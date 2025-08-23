@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/jose-valero/popflash-queue-bot/internal/queue"
@@ -51,7 +52,7 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 		q, _ := qman.GetQueue(queueID)
-		_ = SendResponseWithComponents(s, i, renderQueue(q), componentsForQueue(q))
+		_ = SendEmbedWithComponents(s, i, renderQueueEmbed(q), componentsWithKick(q))
 		return
 
 	case "joinqueue":
@@ -84,7 +85,7 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			_ = SendEphemeral(s, i, "⚠️ "+err.Error())
 			return
 		}
-		_ = SendResponse(s, i, renderQueue(q))
+		_ = SendEmbedWithComponents(s, i, renderQueueEmbed(q), nil)
 	}
 }
 
@@ -101,7 +102,34 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	u := userOf(i)
 	log.Printf("[component] %s by %s", customID, safeName(u))
 
+	// Kick dinámico: botones con CustomID = "kick_<userID>"
+	if strings.HasPrefix(customID, "kick_") {
+		targetID := strings.TrimPrefix(customID, "kick_")
+
+		if err := qman.LeaveQueue(queueID, targetID); err != nil {
+			switch {
+			case errors.Is(err, queue.ErrNotIn):
+				_ = SendEphemeral(s, i, "⚠️ Ese usuario no está en la cola.")
+			case errors.Is(err, queue.ErrNotFound):
+				_ = SendEphemeral(s, i, "⚠️ No hay cola activa.")
+			default:
+				_ = SendEphemeral(s, i, "⚠️ "+err.Error())
+			}
+			return
+		}
+
+		if q, e := qman.GetQueue(queueID); e == nil {
+			// Actualiza el embed y re-renderiza todos los botones (controles + kicks)
+			_ = UpdateEmbedWithComponents(s, i, renderQueueEmbed(q), componentsWithKick(q))
+		} else {
+			// Fallback raro: confirma y deja sin tocar componentes
+			_ = UpdateMessageWithComponents(s, i, "✅ Usuario removido.", nil)
+		}
+		return
+	}
+
 	switch customID {
+
 	case "queue_join":
 		if u == nil {
 			_ = SendEphemeral(s, i, "⚠️ Could not identify the user.")
@@ -119,7 +147,7 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 		if q, e := qman.GetQueue(queueID); e == nil {
-			_ = UpdateMessageWithComponents(s, i, renderQueue(q), componentsForQueue(q))
+			_ = UpdateEmbedWithComponents(s, i, renderQueueEmbed(q), componentsWithKick(q))
 		}
 
 	case "queue_leave":
@@ -137,7 +165,7 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 		if q, e := qman.GetQueue(queueID); e == nil {
-			_ = UpdateMessageWithComponents(s, i, renderQueue(q), componentsForQueue(q))
+			_ = UpdateEmbedWithComponents(s, i, renderQueueEmbed(q), componentsWithKick(q))
 		}
 
 	case "queue_close":
@@ -152,11 +180,12 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 
 		if q, e := qman.GetQueue(queueID); e == nil {
-			_ = UpdateMessageWithComponents(s, i, renderQueue(q), componentsForQueue(q))
+			_ = UpdateEmbedWithComponents(s, i, renderQueueEmbed(q), componentsWithKick(q))
 		} else {
-			_ = UpdateMessageWithComponents(s, i, "🔁 Cola reseteada.", componentsRowDisabled(false))
+			_ = UpdateEmbedWithComponents(s, i, renderQueueEmbed(nil), componentsRowDisabled(false))
 			return
 		}
 		return
+
 	}
 }

@@ -75,3 +75,31 @@ func safeName(u *discordgo.User) string {
 	}
 	return u.Username
 }
+
+func SendEmbedWithComponents(s *discordgo.Session, i *discordgo.InteractionCreate, emb *discordgo.MessageEmbed, comps []discordgo.MessageComponent) error {
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{emb},
+			Components: comps,
+		},
+	})
+	if err != nil {
+		log.Printf("SendEmbedWithComponents error: %v", err)
+	}
+	return err
+}
+
+func UpdateEmbedWithComponents(s *discordgo.Session, i *discordgo.InteractionCreate, emb *discordgo.MessageEmbed, comps []discordgo.MessageComponent) error {
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{emb},
+			Components: comps,
+		},
+	})
+	if err != nil {
+		log.Printf("UpdateEmbedWithComponents error: %v", err)
+	}
+	return err
+}
