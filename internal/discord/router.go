@@ -145,5 +145,18 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		_ = UpdateMessageWithComponents(s, i, "🛑 Queue closed.", nil)
 		return
 
+	case "queue_reset":
+		if err := qman.ResetQueue(queueID); err != nil {
+			_ = SendEphemeral(s, i, "⚠️ No hay una cola activa que resetear.")
+			return
+		}
+
+		if q, e := qman.GetQueue(queueID); e == nil {
+			_ = UpdateMessageWithComponents(s, i, renderQueue(q), componentsForQueue(q))
+		} else {
+			_ = UpdateMessageWithComponents(s, i, "🔁 Cola reseteada.", componentsRowDisabled(false))
+			return
+		}
+		return
 	}
 }

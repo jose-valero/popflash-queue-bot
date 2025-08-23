@@ -31,6 +31,7 @@ func componentsRowDisabled(disabled bool) []discordgo.MessageComponent {
 				discordgo.Button{Label: "La Llevo", Style: discordgo.PrimaryButton, CustomID: "queue_join", Disabled: disabled},
 				discordgo.Button{Label: "Chau", Style: discordgo.SecondaryButton, CustomID: "queue_leave"},
 				discordgo.Button{Label: "Close", Style: discordgo.DangerButton, CustomID: "queue_close"},
+				discordgo.Button{Label: "Reset", Style: discordgo.DangerButton, CustomID: "queue_reset"},
 			},
 		},
 	}

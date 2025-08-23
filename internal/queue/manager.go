@@ -101,6 +101,19 @@ func (m *Manager) DeleteQueue(queueID string) {
 	delete(m.queues, queueID)
 }
 
+func (m *Manager) ResetQueue(queueID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	q, ok := m.queues[queueID]
+	if !ok {
+		return ErrNotFound
+	}
+
+	q.Players = []Player{}
+	return nil
+}
+
 func snapshot(q *Queue) *Queue {
 	cp := *q
 	cp.Players = append([]Player(nil), q.Players...)
