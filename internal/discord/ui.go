@@ -3,117 +3,84 @@ package discord
 import (
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/jose-valero/popflash-queue-bot/internal/queue"
 )
 
-func trimLabel(s string, max int) string {
-	if utf8.RuneCountInString(s) <= max {
-		return s
-	}
-	rs := []rune(s)
-	if max <= 1 {
-		return "…"
-	}
-	return string(rs[:max-1]) + "…"
-}
-
-func renderQueueEmbed(q *queue.Queue) *discordgo.MessageEmbed {
-	if q == nil {
+// Embed con TODAS las colas del canal
+func renderQueuesEmbed(qs []*queue.Queue) *discordgo.MessageEmbed {
+	if len(qs) == 0 {
 		return &discordgo.MessageEmbed{
-			Title:       "❌ No hay cola activa",
-			Description: "Usa `/startqueue` para crear una.",
-			Color:       0xED4245, // rojo
+			Title:       "❌ No hay colas activas",
+			Description: "Usa `/startqueue` para crear la primera.",
+			Color:       0xED4245,
 		}
 	}
 
-	// Construimos la lista en un bloque de código para “cajita” visual
 	var b strings.Builder
-	if len(q.Players) == 0 {
-		b.WriteString("_(No hay nadie llevándola)_")
-	} else {
-		for idx, p := range q.Players {
-			fmt.Fprintf(&b, "%d) %s\n", idx+1, p.Username)
+	for idx, q := range qs {
+		fmt.Fprintf(&b, "**Queue #%d** (%d/%d)\n", idx+1, len(q.Players), q.Capacity)
+		if len(q.Players) == 0 {
+			b.WriteString("_(vacía)_\n\n")
+			continue
 		}
+		for i, p := range q.Players {
+			fmt.Fprintf(&b, "%d) %s\n", i+1, p.Username)
+		}
+		b.WriteString("\n")
 	}
 
 	return &discordgo.MessageEmbed{
-		Title:       fmt.Sprintf("%s (%d/%d)", q.Name, len(q.Players), q.Capacity),
+		Title:       fmt.Sprintf("Ellos la llevan — %d cola(s)", len(qs)),
 		Description: b.String(),
-		Color:       0xB069FF, // “blurple” de Discord
+		Color:       0xB069FF,
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: "XCG BOT • /Chau saldras de la lista y no podremos guardar tu lugar",
+			Text: "XCG BOT • Join llena la primera cola con espacio; Reset/Close actúan sobre una cola específica",
 		},
 	}
 }
 
-// Construye componentes: fila de controles + filas de "Kick" por jugador.
-// Respeta el límite de 5 filas totales (Discord) y 5 botones por fila.
-func componentsWithKick(q *queue.Queue) []discordgo.MessageComponent {
-	comps := componentsForQueue(q) // tu fila: La Llevo / Chau / Close / Reset
-	if q == nil || len(q.Players) == 0 {
-		return comps
-	}
-
-	// cuántas filas extra me quedan (máx 5 en total)
-	remainingRows := 5 - len(comps)
-	if remainingRows <= 0 {
-		return comps
-	}
-
-	row := discordgo.ActionsRow{}
-	rowsUsed := 0
-	addRow := func() {
-		if len(row.Components) > 0 {
-			comps = append(comps, row)
-			row = discordgo.ActionsRow{}
-			rowsUsed++
-		}
-	}
-
-	for _, p := range q.Players {
-		btn := discordgo.Button{
-			Label:    fmt.Sprintf("Kick %s", trimLabel(p.Username, 18)), // 👈 sin emoji, con nombre
-			Style:    discordgo.DangerButton,
-			CustomID: "kick_" + p.ID, // importante: el ID real va en el CustomID
-		}
-		row.Components = append(row.Components, btn)
-
-		if len(row.Components) == 5 {
-			addRow()
-			if rowsUsed >= remainingRows {
-				break
-			}
-		}
-	}
-	// última fila parcial
-	if rowsUsed < remainingRows && len(row.Components) > 0 {
-		comps = append(comps, row)
-	}
-
-	return comps
-}
-
-// NUEVO: misma fila pero con Join deshabilitado si la cola está llena
-func componentsRowDisabled(disabled bool) []discordgo.MessageComponent {
-	return []discordgo.MessageComponent{
+// Componentes para multi-cola:
+//   - Fila base: Join / Leave
+//   - Select: acciones por cola (Reset / Close) en la cola seleccionada
+func componentsForQueues(qs []*queue.Queue) []discordgo.MessageComponent {
+	components := []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
-				discordgo.Button{Label: "La Llevo", Style: discordgo.PrimaryButton, CustomID: "queue_join", Disabled: disabled},
-				discordgo.Button{Label: "Chau", Style: discordgo.SecondaryButton, CustomID: "queue_leave"},
-				discordgo.Button{Label: "Close", Style: discordgo.DangerButton, CustomID: "queue_close"},
-				discordgo.Button{Label: "Reset", Style: discordgo.DangerButton, CustomID: "queue_reset"},
+				discordgo.Button{Label: "La Llevo", Style: discordgo.PrimaryButton, CustomID: "queue_join", Emoji: &discordgo.ComponentEmoji{Name: "🌕"}},
+				discordgo.Button{Label: "Chau", Style: discordgo.SecondaryButton, CustomID: "queue_leave", Emoji: &discordgo.ComponentEmoji{Name: "👋"}},
 			},
 		},
 	}
-}
 
-func componentsForQueue(q *queue.Queue) []discordgo.MessageComponent {
-	if q == nil {
-		return nil
+	if len(qs) > 0 {
+		opts := make([]discordgo.SelectMenuOption, 0, len(qs)*2)
+		for idx := range qs {
+			n := idx + 1
+			opts = append(opts,
+				discordgo.SelectMenuOption{
+					Label:       fmt.Sprintf("Reset Q#%d", n),
+					Value:       fmt.Sprintf("reset:%d", n),
+					Description: "Vacía esa cola",
+				},
+				discordgo.SelectMenuOption{
+					Label:       fmt.Sprintf("Close Q#%d", n),
+					Value:       fmt.Sprintf("close:%d", n),
+					Description: "Elimina esa cola",
+				},
+			)
+		}
+		components = append(components, discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "queue_action",
+					Placeholder: "Acciones por cola… (reset/close)",
+					Options:     opts,
+				},
+			},
+		})
 	}
-	full := len(q.Players) >= q.Capacity
-	return componentsRowDisabled(full)
+
+	return components
 }

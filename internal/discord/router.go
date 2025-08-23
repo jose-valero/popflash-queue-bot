@@ -2,8 +2,8 @@ package discord
 
 import (
 	"errors"
-	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
@@ -16,6 +16,7 @@ var (
 	defaultCapacity = 5
 )
 
+// Config en runtime (canal destino y capacidad por cola)
 func SetRuntimeConfig(channelID string, capacity int) {
 	targetChannelID = channelID
 	if capacity > 0 {
@@ -32,12 +33,12 @@ func HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 }
 
-// -------- slash --------
+// ------------------- SLASH -------------------
 
 func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	// restringir canal
+	// restringir canal (opcional)
 	if targetChannelID != "" && i.ChannelID != targetChannelID {
-		_ = SendEphemeral(s, i, "Use this command in the designated queue channel.")
+		_ = SendEphemeral(s, i, "Usa este comando en el canal designado de la cola.")
 		return
 	}
 
@@ -46,54 +47,64 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	log.Printf("[slash] %s in channel %s", name, i.ChannelID)
 
 	switch name {
+
 	case "startqueue":
-		if _, err := qman.CreateQueue(queueID, "Ellos la llevan", defaultCapacity); err != nil {
+		if _, err := qman.EnsureFirstQueue(queueID, "Queue #1", defaultCapacity); err != nil {
 			_ = SendEphemeral(s, i, "⚠️ "+err.Error())
 			return
 		}
-		q, _ := qman.GetQueue(queueID)
-		_ = SendEmbedWithComponents(s, i, renderQueueEmbed(q), componentsWithKick(q))
+		// seedDemoPlayers(12, queueID)
+		if qs, err := qman.Queues(queueID); err == nil {
+			_ = SendEmbedWithComponents(s, i, renderQueuesEmbed(qs), componentsForQueues(qs))
+		}
 		return
 
 	case "joinqueue":
 		u := userOf(i)
 		if u == nil {
-			_ = SendEphemeral(s, i, "⚠️ Could not identify the user.")
+			_ = SendEphemeral(s, i, "⚠️ No pudimos identificarte.")
 			return
 		}
-		if err := qman.JoinQueue(queueID, u.ID, u.Username); err != nil {
+		if _, err := qman.JoinAny(queueID, u.ID, u.Username, defaultCapacity); err != nil && !errors.Is(err, queue.ErrAlreadyIn) {
 			_ = SendEphemeral(s, i, "⚠️ "+err.Error())
 			return
 		}
-		_ = SendResponse(s, i, fmt.Sprintf("🙌 %s joined the queue.", u.Username))
+		_ = SendEphemeral(s, i, "🙌 ¡Listo! Te agregamos a la primera cola con espacio.")
+		return
 
 	case "leavequeue":
 		u := userOf(i)
 		if u == nil {
-			_ = SendEphemeral(s, i, "⚠️ Could not identify the user.")
+			_ = SendEphemeral(s, i, "⚠️ No pudimos identificarte.")
 			return
 		}
-		if err := qman.LeaveQueue(queueID, u.ID); err != nil {
-			_ = SendEphemeral(s, i, "⚠️ "+err.Error())
+		if _, err := qman.LeaveAny(queueID, u.ID); err != nil {
+			switch {
+			case errors.Is(err, queue.ErrNotIn):
+				_ = SendEphemeral(s, i, "⚠️ No estás en ninguna cola.")
+			default:
+				_ = SendEphemeral(s, i, "⚠️ "+err.Error())
+			}
 			return
 		}
-		_ = SendResponse(s, i, fmt.Sprintf("👋 %s left the queue.", u.Username))
+		_ = SendEphemeral(s, i, "👋 Saliste de tu cola y re-balanceamos listas.")
+		return
 
 	case "queue":
-		q, err := qman.GetQueue(queueID)
-		if err != nil {
-			_ = SendEphemeral(s, i, "⚠️ "+err.Error())
-			return
+		if qs, err := qman.Queues(queueID); err == nil {
+			_ = SendEphemeralEmbed(s, i, renderQueuesEmbed(qs))
+		} else {
+			_ = SendEphemeral(s, i, "⚠️ No hay colas activas.")
 		}
-		_ = SendEmbedWithComponents(s, i, renderQueueEmbed(q), nil)
+		return
 	}
 }
 
-// -------- botones --------
+// ------------------- COMPONENTES (botones / selects) -------------------
 
 func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if targetChannelID != "" && i.ChannelID != targetChannelID {
-		_ = SendEphemeral(s, i, "Use the buttons in the designated queue channel.")
+		_ = SendEphemeral(s, i, "Usa los botones en el canal designado de la cola.")
 		return
 	}
 
@@ -102,28 +113,40 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	u := userOf(i)
 	log.Printf("[component] %s by %s", customID, safeName(u))
 
-	// Kick dinámico: botones con CustomID = "kick_<userID>"
-	if strings.HasPrefix(customID, "kick_") {
-		targetID := strings.TrimPrefix(customID, "kick_")
+	// Select de acciones por cola: "reset:N" / "close:N"
+	if customID == "queue_action" {
+		vals := i.MessageComponentData().Values
+		if len(vals) == 0 {
+			_ = SendEphemeral(s, i, "⚠️ Selección inválida.")
+			return
+		}
+		parts := strings.SplitN(vals[0], ":", 2)
+		if len(parts) != 2 {
+			_ = SendEphemeral(s, i, "⚠️ Selección inválida.")
+			return
+		}
+		idx, _ := strconv.Atoi(parts[1])
 
-		if err := qman.LeaveQueue(queueID, targetID); err != nil {
-			switch {
-			case errors.Is(err, queue.ErrNotIn):
-				_ = SendEphemeral(s, i, "⚠️ Ese usuario no está en la cola.")
-			case errors.Is(err, queue.ErrNotFound):
-				_ = SendEphemeral(s, i, "⚠️ No hay cola activa.")
-			default:
-				_ = SendEphemeral(s, i, "⚠️ "+err.Error())
-			}
+		var err error
+		switch parts[0] {
+		case "reset":
+			err = qman.ResetAt(queueID, idx)
+		case "close":
+			err = qman.DeleteAt(queueID, idx)
+		default:
+			_ = SendEphemeral(s, i, "⚠️ Acción desconocida.")
+			return
+		}
+		if err != nil {
+			_ = SendEphemeral(s, i, "⚠️ "+err.Error())
 			return
 		}
 
-		if q, e := qman.GetQueue(queueID); e == nil {
-			// Actualiza el embed y re-renderiza todos los botones (controles + kicks)
-			_ = UpdateEmbedWithComponents(s, i, renderQueueEmbed(q), componentsWithKick(q))
+		if qs, e := qman.Queues(queueID); e == nil {
+			_ = UpdateEmbedWithComponents(s, i, renderQueuesEmbed(qs), componentsForQueues(qs))
 		} else {
-			// Fallback raro: confirma y deja sin tocar componentes
-			_ = UpdateMessageWithComponents(s, i, "✅ Usuario removido.", nil)
+			// no quedan colas => deja UI mínima para poder volver a "Join"
+			_ = UpdateEmbedWithComponents(s, i, renderQueuesEmbed(nil), componentsForQueues(nil))
 		}
 		return
 	}
@@ -132,60 +155,52 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	case "queue_join":
 		if u == nil {
-			_ = SendEphemeral(s, i, "⚠️ Could not identify the user.")
+			_ = SendEphemeral(s, i, "⚠️ No pudimos identificarte.")
 			return
 		}
-		if err := qman.JoinQueue(queueID, u.ID, u.Username); err != nil {
-			switch {
-			case errors.Is(err, queue.ErrFull):
-				_ = SendEphemeral(s, i, "⚠️ La lista esta llena, te toca esperar sorry.")
-			case errors.Is(err, queue.ErrAlreadyIn):
-				_ = SendEphemeral(s, i, "⚠️ Ya la estas llevando, calmate.")
-			default:
-				_ = SendEphemeral(s, i, "⚠️ "+err.Error())
+
+		_, err := qman.JoinAny(queueID, u.ID, u.Username, defaultCapacity)
+		if err != nil {
+			if errors.Is(err, queue.ErrAlreadyIn) {
+				// ✅ No-op: no toques el embed; solo avisa efímero
+				_ = SendEphemeral(s, i, "Ya estás en una cola.")
+				return
 			}
+			_ = SendEphemeral(s, i, "⚠️ "+err.Error())
 			return
 		}
-		if q, e := qman.GetQueue(queueID); e == nil {
-			_ = UpdateEmbedWithComponents(s, i, renderQueueEmbed(q), componentsWithKick(q))
+
+		if qs, e := qman.Queues(queueID); e == nil {
+			_ = UpdateEmbedWithComponents(s, i, renderQueuesEmbed(qs), componentsForQueues(qs))
 		}
+		return
 
 	case "queue_leave":
 		if u == nil {
-			_ = SendEphemeral(s, i, "⚠️ Could not identify the user.")
+			_ = SendEphemeral(s, i, "⚠️ No pudimos identificarte.")
 			return
 		}
-		if err := qman.LeaveQueue(queueID, u.ID); err != nil {
+		if _, err := qman.LeaveAny(queueID, u.ID); err != nil {
 			switch {
 			case errors.Is(err, queue.ErrNotIn):
-				_ = SendEphemeral(s, i, "⚠️ You are not in the queue.")
+				_ = SendEphemeral(s, i, "⚠️ No estás en ninguna cola.")
 			default:
 				_ = SendEphemeral(s, i, "⚠️ "+err.Error())
 			}
 			return
 		}
-		if q, e := qman.GetQueue(queueID); e == nil {
-			_ = UpdateEmbedWithComponents(s, i, renderQueueEmbed(q), componentsWithKick(q))
-		}
-
-	case "queue_close":
-		qman.DeleteQueue(queueID)
-		_ = UpdateMessageWithComponents(s, i, "🛑 Queue closed.", nil)
-		return
-
-	case "queue_reset":
-		if err := qman.ResetQueue(queueID); err != nil {
-			_ = SendEphemeral(s, i, "⚠️ No hay una cola activa que resetear.")
-			return
-		}
-
-		if q, e := qman.GetQueue(queueID); e == nil {
-			_ = UpdateEmbedWithComponents(s, i, renderQueueEmbed(q), componentsWithKick(q))
-		} else {
-			_ = UpdateEmbedWithComponents(s, i, renderQueueEmbed(nil), componentsRowDisabled(false))
-			return
+		if qs, e := qman.Queues(queueID); e == nil {
+			_ = UpdateEmbedWithComponents(s, i, renderQueuesEmbed(qs), componentsForQueues(qs))
 		}
 		return
-
 	}
 }
+
+// // DEBUG: llena la(s) cola(s) con N jugadores falsos
+// func seedDemoPlayers(n int, channelID string) {
+// 	for i := 1; i <= n; i++ {
+// 		id := fmt.Sprintf("seed-%02d", i)   // IDs sintéticos
+// 		name := fmt.Sprintf("Seed %02d", i) // nombres visibles
+// 		_, _ = qman.JoinAny(channelID, id, name, defaultCapacity)
+// 	}
+// }
