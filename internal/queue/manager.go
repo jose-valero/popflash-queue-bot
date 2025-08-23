@@ -8,95 +8,101 @@ import (
 
 type Manager struct {
 	queues map[string]*Queue
-	mu     sync.Mutex
+	mu     sync.RWMutex
 }
 
-// manager of queue
+var (
+	ErrExists    = errors.New("queue already exists")
+	ErrNotFound  = errors.New("queue not found")
+	ErrFull      = errors.New("queue is full")
+	ErrAlreadyIn = errors.New("already in queue")
+	ErrNotIn     = errors.New("player not in queue")
+)
+
 func NewManager() *Manager {
-
-	return &Manager{
-		queues: make(map[string]*Queue),
-	}
+	return &Manager{queues: make(map[string]*Queue)}
 }
 
-// create a queueu
 func (m *Manager) CreateQueue(id, name string, capacity int) (*Queue, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if _, exists := m.queues[id]; exists {
-		return nil, errors.New("already exits a queue with the id")
+		return nil, ErrExists
 	}
-
+	if capacity <= 0 {
+		return nil, errors.New("invalid capacity")
+	}
 	q := &Queue{
 		ID:        id,
 		Name:      name,
 		Players:   []Player{},
-		CreatedAt: time.Now(),
+		CreatedAt: time.Now().UTC(),
 		Capacity:  capacity,
 	}
-
 	m.queues[id] = q
 	return q, nil
 }
 
-// join to queue
 func (m *Manager) JoinQueue(queueID, playerID, username string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	q, exists := m.queues[queueID]
 	if !exists {
-		return errors.New("queue not found")
+		return ErrNotFound
 	}
-
 	if len(q.Players) >= q.Capacity {
-		return errors.New("full queue")
+		return ErrFull
 	}
-
-	// Verificar si ya está en la cola
 	for _, p := range q.Players {
 		if p.ID == playerID {
-			return errors.New("you already in queue")
+			return ErrAlreadyIn
 		}
 	}
-
 	q.Players = append(q.Players, Player{
 		ID:       playerID,
 		Username: username,
-		JoinedAt: time.Now(),
+		JoinedAt: time.Now().UTC(),
 	})
-
 	return nil
 }
 
-// leave a queue
 func (m *Manager) LeaveQueue(queueID, playerID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	q, exists := m.queues[queueID]
 	if !exists {
-		return errors.New("queue not found")
+		return ErrNotFound
 	}
-
 	for i, p := range q.Players {
 		if p.ID == playerID {
 			q.Players = append(q.Players[:i], q.Players[i+1:]...)
 			return nil
 		}
 	}
-	return errors.New("player not found in queue")
+	return ErrNotIn
 }
 
-// get a queue state
 func (m *Manager) GetQueue(queueID string) (*Queue, error) {
+	m.mu.RLock()
+	q, ok := m.queues[queueID]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return snapshot(q), nil
+}
+
+func (m *Manager) DeleteQueue(queueID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	delete(m.queues, queueID)
+}
 
-	q, exists := m.queues[queueID]
-	if !exists {
-		return nil, errors.New("queue not found")
-	}
-
-	return q, nil
+func snapshot(q *Queue) *Queue {
+	cp := *q
+	cp.Players = append([]Player(nil), q.Players...)
+	return &cp
 }
