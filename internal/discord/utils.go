@@ -19,7 +19,6 @@ func SendResponse(s *discordgo.Session, i *discordgo.InteractionCreate, msg stri
 	return err
 }
 
-// Respuesta con componentes (botones)
 func SendResponseWithComponents(s *discordgo.Session, i *discordgo.InteractionCreate, msg string, comps []discordgo.MessageComponent) error {
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -34,7 +33,6 @@ func SendResponseWithComponents(s *discordgo.Session, i *discordgo.InteractionCr
 	return err
 }
 
-// Respuesta efímera (solo quien interactúa la ve)
 func SendEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, msg string) error {
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -49,17 +47,17 @@ func SendEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, msg str
 	return err
 }
 
-// Update del mensaje original (para clicks en botones)
-func UpdateMessage(s *discordgo.Session, i *discordgo.InteractionCreate, content string) error {
+// Nuevo: actualizar mensaje y opcionalmente sus componentes (nil => sin botones)
+func UpdateMessageWithComponents(s *discordgo.Session, i *discordgo.InteractionCreate, content string, comps []discordgo.MessageComponent) error {
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseUpdateMessage,
 		Data: &discordgo.InteractionResponseData{
 			Content:    content,
-			Components: componentsRow(),
+			Components: comps,
 		},
 	})
 	if err != nil {
-		log.Printf("UpdateMessage error: %v", err)
+		log.Printf("UpdateMessageWithComponents error: %v", err)
 	}
 	return err
 }

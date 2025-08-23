@@ -13,7 +13,7 @@ func renderQueue(q *queue.Queue) string {
 		return "❌ No active queue."
 	}
 	if len(q.Players) == 0 {
-		return fmt.Sprintf("📋 **%s** (%d/%d)\n_(empty — use the buttons to join)_", q.Name, 0, q.Capacity)
+		return fmt.Sprintf("📋 **%s** (%d/%d)\n_(No hay nadie llevandola)_", q.Name, 0, q.Capacity)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "📋 **%s** (%d/%d)\n", q.Name, len(q.Players), q.Capacity)
@@ -23,14 +23,23 @@ func renderQueue(q *queue.Queue) string {
 	return b.String()
 }
 
-func componentsRow() []discordgo.MessageComponent {
+// NUEVO: misma fila pero con Join deshabilitado si la cola está llena
+func componentsRowDisabled(disabled bool) []discordgo.MessageComponent {
 	return []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
-				discordgo.Button{Label: "Join", Style: discordgo.PrimaryButton, CustomID: "queue_join"},
-				discordgo.Button{Label: "Leave", Style: discordgo.SecondaryButton, CustomID: "queue_leave"},
+				discordgo.Button{Label: "La Llevo", Style: discordgo.PrimaryButton, CustomID: "queue_join", Disabled: disabled},
+				discordgo.Button{Label: "Chau", Style: discordgo.SecondaryButton, CustomID: "queue_leave"},
 				discordgo.Button{Label: "Close", Style: discordgo.DangerButton, CustomID: "queue_close"},
 			},
 		},
 	}
+}
+
+func componentsForQueue(q *queue.Queue) []discordgo.MessageComponent {
+	if q == nil {
+		return nil
+	}
+	full := len(q.Players) >= q.Capacity
+	return componentsRowDisabled(full)
 }

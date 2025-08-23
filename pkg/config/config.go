@@ -1,7 +1,8 @@
 package config
 
 import (
-	"log"
+	"errors"
+	"fmt"
 	"os"
 
 	"github.com/joho/godotenv"
@@ -15,22 +16,48 @@ type Config struct {
 	ChannelID string
 }
 
-func Load() *Config {
+func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
 		Token:     os.Getenv("DISCORD_BOT_TOKEN"),
 		AppID:     os.Getenv("DISCORD_APP_ID"),
 		GuildID:   os.Getenv("DISCORD_GUILD_ID"),
-		Prefix:    os.Getenv("DISCORD_PREFIX"),
+		Prefix:    firstNonEmpty(os.Getenv("DISCORD_PREFIX"), "!"),
 		ChannelID: os.Getenv("DISCORD_CHANNEL_ID"),
 	}
 
+	//---- minimal validations of envs ----
 	if cfg.Token == "" || cfg.AppID == "" {
-		log.Fatal("Faltan DISCORD_BOT_TOKEN o DISCORD_APP_ID en .env")
+		return nil, errors.New("missing DISCORD_BOT_TOKEN")
 	}
+
+	if cfg.AppID == "" {
+		return nil, errors.New("missing DISCORD_APP_ID")
+	}
+
 	if cfg.GuildID == "" {
-		log.Println("⚠️ DISCORD_GUILD_ID vacío: los commands tardarán en propagarse si los registras globales.")
+		return nil, errors.New("missing DISCORD_GUILD_ID")
 	}
-	return cfg
+
+	return cfg, nil
+}
+
+// simple helper for non empty value, por ahora para el prefix
+func firstNonEmpty(v, d string) string {
+	if v == "" {
+		return d
+	}
+	return v
+}
+
+func (c *Config) Redacted() string {
+	tok := "[set]"
+
+	if c.Token == "" {
+		tok = "[empyy]"
+	}
+
+	return fmt.Sprintf("appID=%s guildID=%s prefix=%q channelID=%s token=%s",
+		c.AppID, c.GuildID, c.Prefix, c.ChannelID, tok)
 }

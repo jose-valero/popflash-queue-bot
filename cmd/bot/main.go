@@ -43,14 +43,6 @@ func main() {
 	// Intents: Guilds (slash) + GuildMessages (solo para el ping temporal)
 	session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages
 
-	// DEBUG: listo + interacciones
-	session.AddHandlerOnce(func(s *discordgo.Session, r *discordgo.Ready) {
-		log.Printf("✅ Ready as %s (%s)", s.State.User.Username, s.State.User.ID)
-	})
-	session.AddHandler(func(s *discordgo.Session, ic *discordgo.InteractionCreate) {
-		log.Printf("DEBUG InteractionCreate type=%d channel=%s", ic.Type, ic.ChannelID)
-	})
-
 	// ping temporal (puedes quitarlo luego)
 	session.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
 		if m.Author.Bot {
@@ -70,7 +62,6 @@ func main() {
 	}
 	defer session.Close()
 
-	log.Printf("APP_ID (env)=%s | BOT_ID (ready)=%s", appID, session.State.User.ID)
 	log.Println("🤖 Bot corriendo. Registrando comandos...")
 
 	// IMPORTANTE: registrar comandos con el BOT_ID (lo hace la función via s.State.User.ID)

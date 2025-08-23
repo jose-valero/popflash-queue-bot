@@ -46,13 +46,12 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	switch name {
 	case "startqueue":
-		if _, err := qman.CreateQueue(queueID, "Match Queue", defaultCapacity); err != nil {
+		if _, err := qman.CreateQueue(queueID, "Ellos la llevan", defaultCapacity); err != nil {
 			_ = SendEphemeral(s, i, "⚠️ "+err.Error())
 			return
 		}
 		q, _ := qman.GetQueue(queueID)
-		fmt.Println("🧪 q =>", q)
-		_ = SendResponseWithComponents(s, i, renderQueue(q), componentsRow())
+		_ = SendResponseWithComponents(s, i, renderQueue(q), componentsForQueue(q))
 		return
 
 	case "joinqueue":
@@ -111,20 +110,16 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if err := qman.JoinQueue(queueID, u.ID, u.Username); err != nil {
 			switch {
 			case errors.Is(err, queue.ErrFull):
-				if q, e := qman.GetQueue(queueID); e == nil {
-					_ = UpdateMessage(s, i, renderQueue(q)+"\n\n⚠️ Queue is full.")
-				} else {
-					_ = SendEphemeral(s, i, "⚠️ "+err.Error())
-				}
+				_ = SendEphemeral(s, i, "⚠️ La lista esta llena, te toca esperar sorry.")
 			case errors.Is(err, queue.ErrAlreadyIn):
-				_ = SendEphemeral(s, i, "⚠️ You are already in the queue.")
+				_ = SendEphemeral(s, i, "⚠️ Ya la estas llevando, calmate.")
 			default:
 				_ = SendEphemeral(s, i, "⚠️ "+err.Error())
 			}
 			return
 		}
 		if q, e := qman.GetQueue(queueID); e == nil {
-			_ = UpdateMessage(s, i, renderQueue(q))
+			_ = UpdateMessageWithComponents(s, i, renderQueue(q), componentsForQueue(q))
 		}
 
 	case "queue_leave":
@@ -142,12 +137,13 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 		if q, e := qman.GetQueue(queueID); e == nil {
-			_ = UpdateMessage(s, i, renderQueue(q))
+			_ = UpdateMessageWithComponents(s, i, renderQueue(q), componentsForQueue(q))
 		}
 
 	case "queue_close":
 		qman.DeleteQueue(queueID)
-		_ = UpdateMessage(s, i, "🛑 Queue closed.")
+		_ = UpdateMessageWithComponents(s, i, "🛑 Queue closed.", nil)
 		return
+
 	}
 }
