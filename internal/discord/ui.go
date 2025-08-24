@@ -20,7 +20,7 @@ func renderQueuesEmbed(qs []*queue.Queue) *discordgo.MessageEmbed {
 
 	var b strings.Builder
 	for idx, q := range qs {
-		fmt.Fprintf(&b, "**Queue #%d** (%d/%d)\n", idx+1, len(q.Players), q.Capacity)
+		fmt.Fprintf(&b, "**Banca #%d** (%d/%d)\n", idx+1, len(q.Players), q.Capacity)
 		if len(q.Players) == 0 {
 			b.WriteString("_(vacía)_\n\n")
 			continue
@@ -36,7 +36,7 @@ func renderQueuesEmbed(qs []*queue.Queue) *discordgo.MessageEmbed {
 		Description: b.String(),
 		Color:       0xB069FF,
 		Footer: &discordgo.MessageEmbedFooter{
-			Text: "XCG BOT • Join llena la primera cola con espacio; Reset/Close actúan sobre una cola específica",
+			Text: "XCG BOT • no pierdas tu lugar",
 		},
 	}
 }
@@ -81,6 +81,49 @@ func componentsForQueues(qs []*queue.Queue) []discordgo.MessageComponent {
 			},
 		})
 	}
+	// NUEVO: Select para kickear jugadores (máx 25)
+	if hasAnyPlayers(qs) {
+		kopts := kickOptions(qs)
+		if len(kopts) > 0 {
+			components = append(components, discordgo.ActionsRow{
+				Components: []discordgo.MessageComponent{
+					discordgo.SelectMenu{
+						CustomID:    "queue_kick",
+						Placeholder: "Kickear jugador…",
+						Options:     kopts,
+					},
+				},
+			})
+		}
+	}
 
 	return components
+}
+
+// ¿hay al menos un jugador en alguna cola?
+func hasAnyPlayers(qs []*queue.Queue) bool {
+	for _, q := range qs {
+		if len(q.Players) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// Construye opciones para el select "kick", tope 25 (límite de Discord)
+func kickOptions(qs []*queue.Queue) []discordgo.SelectMenuOption {
+	opts := make([]discordgo.SelectMenuOption, 0, 25)
+	for qi, q := range qs {
+		for _, p := range q.Players {
+			opts = append(opts, discordgo.SelectMenuOption{
+				Label:       fmt.Sprintf("Kick %s (Q#%d)", p.Username, qi+1),
+				Value:       "uid:" + p.ID, // el value viaja al handler
+				Description: "",            // opcional
+			})
+			if len(opts) == 25 {
+				return opts
+			}
+		}
+	}
+	return opts
 }

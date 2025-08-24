@@ -2,6 +2,7 @@ package discord
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ func SetRuntimeConfig(channelID string, capacity int) {
 	}
 }
 
+// ------------------- la posta ----------------
 func HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	switch i.Type {
 	case discordgo.InteractionApplicationCommand:
@@ -53,7 +55,7 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			_ = SendEphemeral(s, i, "⚠️ "+err.Error())
 			return
 		}
-		// seedDemoPlayers(12, queueID)
+		seedDemoPlayers(11, queueID)
 		if qs, err := qman.Queues(queueID); err == nil {
 			_ = SendEmbedWithComponents(s, i, renderQueuesEmbed(qs), componentsForQueues(qs))
 		}
@@ -115,6 +117,11 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	// Select de acciones por cola: "reset:N" / "close:N"
 	if customID == "queue_action" {
+		// 🔒 permisos
+		if !requirePrivileged(s, i) {
+			return
+		}
+
 		vals := i.MessageComponentData().Values
 		if len(vals) == 0 {
 			_ = SendEphemeral(s, i, "⚠️ Selección inválida.")
@@ -146,6 +153,57 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			_ = UpdateEmbedWithComponents(s, i, renderQueuesEmbed(qs), componentsForQueues(qs))
 		} else {
 			// no quedan colas => deja UI mínima para poder volver a "Join"
+			_ = UpdateEmbedWithComponents(s, i, renderQueuesEmbed(nil), componentsForQueues(nil))
+		}
+		return
+	}
+
+	// Select "queue_kick" — kickea al jugador elegido (requiere permisos)
+	if customID == "queue_kick" {
+		// 🔒 permisos: usa roles de ADMIN_ROLE_IDS o Administrator
+		if !requirePrivileged(s, i) {
+			return
+		}
+
+		vals := i.MessageComponentData().Values
+		if len(vals) == 0 {
+			_ = SendEphemeral(s, i, "⚠️ Selección inválida.")
+			return
+		}
+		uid := vals[0]
+		uid = strings.TrimPrefix(uid, "uid:")
+
+		// (opcional) busca el nombre para confirmación
+		// var victim string
+		if qs, err := qman.Queues(queueID); err == nil {
+		outer:
+			for _, q := range qs {
+				for _, p := range q.Players {
+					if p.ID == uid {
+						// victim = p.Username
+						break outer
+					}
+				}
+			}
+		}
+
+		if _, err := qman.LeaveAny(queueID, uid); err != nil {
+			switch {
+			case errors.Is(err, queue.ErrNotIn):
+				_ = SendEphemeral(s, i, "⚠️ Ese usuario ya no está en ninguna cola.")
+			case errors.Is(err, queue.ErrNotFound):
+				_ = SendEphemeral(s, i, "⚠️ No hay colas activas.")
+			default:
+				_ = SendEphemeral(s, i, "⚠️ "+err.Error())
+			}
+			return
+		}
+
+		// Re-render UI tras el kick (con rebalanceo automático)
+		if qs, err := qman.Queues(queueID); err == nil {
+			_ = UpdateEmbedWithComponents(s, i, renderQueuesEmbed(qs), componentsForQueues(qs))
+		} else {
+			// si no queda ninguna cola, deja UI mínima
 			_ = UpdateEmbedWithComponents(s, i, renderQueuesEmbed(nil), componentsForQueues(nil))
 		}
 		return
@@ -197,10 +255,10 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 // // DEBUG: llena la(s) cola(s) con N jugadores falsos
-// func seedDemoPlayers(n int, channelID string) {
-// 	for i := 1; i <= n; i++ {
-// 		id := fmt.Sprintf("seed-%02d", i)   // IDs sintéticos
-// 		name := fmt.Sprintf("Seed %02d", i) // nombres visibles
-// 		_, _ = qman.JoinAny(channelID, id, name, defaultCapacity)
-// 	}
-// }
+func seedDemoPlayers(n int, channelID string) {
+	for i := 1; i <= n; i++ {
+		id := fmt.Sprintf("seed-%02d", i)   // IDs sintéticos
+		name := fmt.Sprintf("Seed %02d", i) // nombres visibles
+		_, _ = qman.JoinAny(channelID, id, name, defaultCapacity)
+	}
+}

@@ -2,11 +2,52 @@ package discord
 
 import (
 	"log"
+	"os"
+	"strings"
 
 	"github.com/bwmarrin/discordgo"
 )
 
 const ephemeralFlag = 1 << 6
+
+var adminRoleSet = map[string]struct{}{}
+
+func init() {
+	// Lee ADMIN_ROLE_IDS al iniciar el proceso
+	for id := range strings.SplitSeq(os.Getenv("ADMIN_ROLE_IDS"), ",") {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			adminRoleSet[id] = struct{}{}
+		}
+	}
+}
+
+// Devuelve true si el usuario tiene Administrator o alguno de los roles configurados
+func isPrivileged(i *discordgo.InteractionCreate) bool {
+	if i.Member == nil {
+		return false
+	}
+	// override por permiso Administrator
+	if i.Member.Permissions&discordgo.PermissionAdministrator != 0 {
+		return true
+	}
+	// match por roles configurados
+	for _, r := range i.Member.Roles {
+		if _, ok := adminRoleSet[r]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// Atajo: responde efímero y corta si no tiene permisos
+func requirePrivileged(s *discordgo.Session, i *discordgo.InteractionCreate) bool {
+	if isPrivileged(i) {
+		return true
+	}
+	_ = SendEphemeral(s, i, "⛔ No tienes permiso para esta acción.")
+	return false
+}
 
 // --------- helpers de respuesta de texto ---------
 
