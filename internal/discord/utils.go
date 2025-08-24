@@ -18,8 +18,8 @@ var adminRoleSet = map[string]struct{}{}
 
 var afkChannelOverride string
 
-var allowedCategoryIDs = map[string]struct{}{}   // ya lo tenías como allowedVoiceCategories
-var allowedCategoryNames = map[string]struct{}{} // por nombre de categoría (lowercase)
+var allowedCategoryIDs = map[string]struct{}{}   // IDs de categorías permitidas
+var allowedCategoryNames = map[string]struct{}{} // nombres de categorías (lowercase)
 var allowedChannelPrefixes []string              // prefijos de nombre de canal de voz (lowercase)
 
 var (
@@ -37,6 +37,9 @@ var queueMsgIDs sync.Map // channelID -> messageID
 // Cache: última voz conocida por (guild,user)
 var lastVoice sync.Map
 
+// Canal donde escuchamos “match started/finished”
+var pfAnnounceChannelID string
+
 func voiceKey(guildID, userID string) string { return guildID + ":" + userID }
 func setLastVoice(guildID, userID, channelID string) {
 	lastVoice.Store(voiceKey(guildID, userID), channelID)
@@ -47,6 +50,45 @@ func getLastVoice(guildID, userID string) (string, bool) {
 		return "", false
 	}
 	return v.(string), true
+}
+
+// ====== Estado de apertura/cierre por canal ======
+var queueOpen sync.Map // channelID -> bool
+
+func SetQueueOpen(channelID string, open bool) {
+	if channelID == "" {
+		return
+	}
+	queueOpen.Store(channelID, open)
+}
+
+func IsQueueOpen(channelID string) bool {
+	if v, ok := queueOpen.Load(channelID); ok {
+		if b, ok2 := v.(bool); ok2 {
+			return b
+		}
+	}
+	return false
+}
+
+// Publica o edita el mensaje principal de colas en el canal
+func PublishOrEditQueueMessage(s *discordgo.Session, channelID string, emb *discordgo.MessageEmbed, comps []discordgo.MessageComponent) error {
+	// Si ya conocemos el messageID, intentamos editar
+	if _, ok := getQueueMessageID(channelID); ok {
+		return EditQueueMessage(s, channelID, emb, comps)
+	}
+	// Si no, publicamos uno nuevo y guardamos su ID
+	msg, err := s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+		Embeds:     []*discordgo.MessageEmbed{emb},
+		Components: comps,
+	})
+	if err != nil {
+		return err
+	}
+	if msg != nil {
+		SetQueueMessageID(channelID, msg.ID)
+	}
+	return nil
 }
 
 func init() {
@@ -73,7 +115,7 @@ func init() {
 		}
 	}
 
-	// Prefijos de nombre de canal
+	// Prefijos de nombre de canal (opcional)
 	for _, p := range strings.Split(os.Getenv("VOICE_ALLOWED_CHANNEL_PREFIXES"), ",") {
 		p = strings.TrimSpace(strings.ToLower(p))
 		if p != "" {
@@ -83,7 +125,10 @@ func init() {
 
 	afkChannelOverride = strings.TrimSpace(os.Getenv("AFK_CHANNEL_ID"))
 
-	// Gracia
+	// Canal de anuncios (scrims)
+	pfAnnounceChannelID = strings.TrimSpace(os.Getenv("PF_ANNOUNCE_CHANNEL_ID"))
+
+	// Ventanas de gracia
 	if v := os.Getenv("ABSENT_GRACE_MIN"); v != "" {
 		if m, err := strconv.Atoi(v); err == nil && m > 0 {
 			absentGrace = time.Duration(m) * time.Minute
@@ -219,7 +264,6 @@ func EditQueueMessage(s *discordgo.Session, channelID string, emb *discordgo.Mes
 	}
 
 	embeds := []*discordgo.MessageEmbed{emb} // necesitamos un slice para tomarle la dirección
-	// OJO: tomar la dirección del slice (no de un literal)
 	compsCopy := comps
 
 	_, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
@@ -379,6 +423,7 @@ func safeName(u *discordgo.User) string {
 	return u.Username
 }
 
+// Anuncia expulsiones (AFK/ausente) en el canal de la cola
 func notifyUserKicked(s *discordgo.Session, userID, reason string) {
 	if targetChannelID == "" {
 		return
@@ -393,49 +438,3 @@ func notifyUserKicked(s *discordgo.Session, userID, reason string) {
 		log.Printf("notifyUserKicked error: %v", err)
 	}
 }
-
-// --- DEBUG helpers ---
-// func mapKeys(m map[string]struct{}) []string {
-// 	out := make([]string, 0, len(m))
-// 	for k := range m {
-// 		out = append(out, k)
-// 	}
-// 	return out
-// }
-
-// func safe(s string) string {
-// 	if s == "" {
-// 		return "?"
-// 	}
-// 	return s
-// }
-
-// func debugVoiceSnapshot(s *discordgo.Session, guildID, userID string) (voiceID, voiceName, parentID, parentName string) {
-// 	// Primero cache propio
-// 	if chID, ok := getLastVoice(guildID, userID); ok && chID != "" {
-// 		voiceID = chID
-// 	} else {
-// 		// Fallback a state de discordgo
-// 		if vs, _ := s.State.VoiceState(guildID, userID); vs != nil {
-// 			voiceID = vs.ChannelID
-// 		}
-// 	}
-
-// 	if voiceID != "" {
-// 		if ch, _ := s.State.Channel(voiceID); ch != nil {
-// 			voiceName = ch.Name
-// 			parentID = ch.ParentID
-// 		} else if ch2, _ := s.Channel(voiceID); ch2 != nil {
-// 			voiceName = ch2.Name
-// 			parentID = ch2.ParentID
-// 		}
-// 		if parentID != "" {
-// 			if cat, _ := s.State.Channel(parentID); cat != nil {
-// 				parentName = cat.Name
-// 			} else if cat2, _ := s.Channel(parentID); cat2 != nil {
-// 				parentName = cat2.Name
-// 			}
-// 		}
-// 	}
-// 	return
-// }

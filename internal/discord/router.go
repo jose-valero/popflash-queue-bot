@@ -74,10 +74,6 @@ func scheduleAFKKick(s *discordgo.Session, guildID, channelID, userID string) {
 		}
 		_, _ = qman.LeaveAny(channelID, userID)
 
-		// if _, err := qman.LeaveAny(channelID, userID); err == nil {
-		// 	notifyUserKicked(s, userID,
-		// 		fmt.Sprintf("estuviste en el canal AFK por %d min.", int(afkGrace/time.Minute)))
-		// }
 		notifyUserKicked(s, userID, fmt.Sprintf("estuviste en el canal AFK por %v.", afkGrace))
 
 		if qs, err := qman.Queues(channelID); err == nil {
@@ -96,7 +92,7 @@ func SetRuntimeConfig(channelID string, capacity int) {
 	}
 }
 
-// ------------------- la posta ----------------
+// ------------------- Router principal ----------------
 func HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	switch i.Type {
 	case discordgo.InteractionApplicationCommand:
@@ -107,7 +103,6 @@ func HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 // ------------------- SLASH -------------------
-
 func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// restringir canal (opcional)
 	if targetChannelID != "" && i.ChannelID != targetChannelID {
@@ -127,9 +122,6 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			_ = SendEphemeral(s, i, "⚠️ "+err.Error())
 			return
 		}
-
-		// (opcional) DEMO: prellenar para probar
-		// seedDemoPlayers(11, queueID)
 
 		// 2) Ack diferido para no timeoutear la interacción
 		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -154,6 +146,8 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 
+		SetQueueOpen(queueID, true)
+
 		// 4) Guardar el messageID para futuras ediciones sin interacción
 		if msg != nil {
 			SetQueueMessageID(queueID, msg.ID)
@@ -167,28 +161,31 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 
-		//👇 NUEVO: exige voz si VOICE_REQUIRE_TO_JOIN=true
-		if voiceRequireToJoin && !isUserInAllowedVoice(s, i.GuildID, u.ID) {
-			_ = SendEphemeral(s, i, "🔇 Debes estar en un canal de voz en XCG ó PopFlashMatches para unirte.")
+		if !IsQueueOpen(queueID) {
+			_ = SendEphemeral(s, i, "🔒 La cola está cerrada. Espera el próximo **match started**.")
 			return
 		}
-		// 👇 NUEVO: exige voz si VOICE_REQUIRE_TO_JOIN=true + DEBUGGER
-		// if voiceRequireToJoin && !isUserInAllowedVoice(s, i.GuildID, u.ID) {
-		// 	vID, vName, pID, pName := debugVoiceSnapshot(s, i.GuildID, u.ID)
-		// 	_ = SendEphemeral(s, i, fmt.Sprintf(
-		// 		"🔇 Debes estar en un canal de voz permitido para unirte.\n\n"+
-		// 			"**Detecté**\n• Voz: %s (`%s`)\n• Categoría: %s (`%s`)\n\n"+
-		// 			"**Permitidos (.env)**\n• IDs categoría: %v\n• Nombres categoría: %v\n• Prefijos canal: %v",
-		// 		safe(vName), safe(vID), safe(pName), safe(pID),
-		// 		mapKeys(allowedCategoryIDs), mapKeys(allowedCategoryNames), allowedChannelPrefixes,
-		// 	))
-		// 	return
-		// }
 
-		if _, err := qman.JoinAny(queueID, u.ID, u.Username, defaultCapacity); err != nil && !errors.Is(err, queue.ErrAlreadyIn) {
+		// exige voz si VOICE_REQUIRE_TO_JOIN=true
+		if voiceRequireToJoin && !isUserInAllowedVoice(s, i.GuildID, u.ID) {
+			_ = SendEphemeral(s, i, "🔇 Debes estar en un canal de voz en XCG 🔥 ó PopFlash Matches para unirte.")
+			return
+		}
+
+		if _, err := qman.JoinAny(queueID, u.ID, u.Username, defaultCapacity); err != nil {
+			if errors.Is(err, queue.ErrAlreadyIn) {
+				_ = SendEphemeral(s, i, "Ya estás en una cola.")
+				return
+			}
 			_ = SendEphemeral(s, i, "⚠️ "+err.Error())
 			return
 		}
+
+		// refrescá el embed público
+		if qs, e := qman.Queues(queueID); e == nil {
+			_ = EditQueueMessage(s, queueID, renderQueuesEmbed(qs), componentsForQueues(qs))
+		}
+
 		_ = SendEphemeral(s, i, "🙌 ¡Listo! Te agregamos a la primera cola con espacio.")
 		return
 
@@ -221,7 +218,6 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 // ------------------- COMPONENTES (botones / selects) -------------------
-
 func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if targetChannelID != "" && i.ChannelID != targetChannelID {
 		_ = SendEphemeral(s, i, "Usa los botones en el canal designado de la cola.")
@@ -235,7 +231,6 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	// Select de acciones por cola: "reset:N" / "close:N"
 	if customID == "queue_action" {
-		// 🔒 permisos
 		if !requirePrivileged(s, i) {
 			return
 		}
@@ -270,7 +265,6 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if qs, e := qman.Queues(queueID); e == nil {
 			_ = UpdateEmbedWithComponents(s, i, renderQueuesEmbed(qs), componentsForQueues(qs))
 		} else {
-			// no quedan colas => deja UI mínima para poder volver a "Join"
 			_ = UpdateEmbedWithComponents(s, i, renderQueuesEmbed(nil), componentsForQueues(nil))
 		}
 		return
@@ -278,7 +272,6 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	// Select "queue_kick" — kickea al jugador elegido (requiere permisos)
 	if customID == "queue_kick" {
-		// 🔒 permisos: usa roles de ADMIN_ROLE_IDS o Administrator
 		if !requirePrivileged(s, i) {
 			return
 		}
@@ -288,22 +281,7 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			_ = SendEphemeral(s, i, "⚠️ Selección inválida.")
 			return
 		}
-		uid := vals[0]
-		uid = strings.TrimPrefix(uid, "uid:")
-
-		// (opcional) busca el nombre para confirmación
-		// var victim string
-		if qs, err := qman.Queues(queueID); err == nil {
-		outer:
-			for _, q := range qs {
-				for _, p := range q.Players {
-					if p.ID == uid {
-						// victim = p.Username
-						break outer
-					}
-				}
-			}
-		}
+		uid := strings.TrimPrefix(vals[0], "uid:")
 
 		if _, err := qman.LeaveAny(queueID, uid); err != nil {
 			switch {
@@ -317,11 +295,9 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 
-		// Re-render UI tras el kick (con rebalanceo automático)
 		if qs, err := qman.Queues(queueID); err == nil {
 			_ = UpdateEmbedWithComponents(s, i, renderQueuesEmbed(qs), componentsForQueues(qs))
 		} else {
-			// si no queda ninguna cola, deja UI mínima
 			_ = UpdateEmbedWithComponents(s, i, renderQueuesEmbed(nil), componentsForQueues(nil))
 		}
 		return
@@ -335,29 +311,20 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 
-		// 👇 NUEVO: igual que arriba
-		if voiceRequireToJoin && !isUserInAllowedVoice(s, i.GuildID, u.ID) {
-			_ = SendEphemeral(s, i, "🔇 Debes estar en un canal de voz en XCG 🔥 ó PopFlashMatches para unirte.")
+		if !IsQueueOpen(queueID) {
+			_ = SendEphemeral(s, i, "🔒 La cola está cerrada. Espera el próximo **match started**.")
 			return
 		}
 
-		// 👇 NUEVO: igual que arriba + debuger
-		// if voiceRequireToJoin && !isUserInAllowedVoice(s, i.GuildID, u.ID) {
-		// 	vID, vName, pID, pName := debugVoiceSnapshot(s, i.GuildID, u.ID)
-		// 	_ = SendEphemeral(s, i, fmt.Sprintf(
-		// 		"🔇 Debes estar en un canal de voz permitido para unirte.\n\n"+
-		// 			"**Detecté**\n• Voz: %s (`%s`)\n• Categoría: %s (`%s`)\n\n"+
-		// 			"**Permitidos (.env)**\n• IDs categoría: %v\n• Nombres categoría: %v\n• Prefijos canal: %v",
-		// 		safe(vName), safe(vID), safe(pName), safe(pID),
-		// 		mapKeys(allowedCategoryIDs), mapKeys(allowedCategoryNames), allowedChannelPrefixes,
-		// 	))
-		// 	return
-		// }
+		// exige voz si VOICE_REQUIRE_TO_JOIN=true
+		if voiceRequireToJoin && !isUserInAllowedVoice(s, i.GuildID, u.ID) {
+			_ = SendEphemeral(s, i, "🔇 Debes estar en un canal de voz en XCG 🔥 ó PopFlash Matches para unirte.")
+			return
+		}
 
 		_, err := qman.JoinAny(queueID, u.ID, u.Username, defaultCapacity)
 		if err != nil {
 			if errors.Is(err, queue.ErrAlreadyIn) {
-				// ✅ No-op: no toques el embed; solo avisa efímero
 				_ = SendEphemeral(s, i, "Ya estás en una cola.")
 				return
 			}
@@ -392,7 +359,6 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 // Observa cambios de voz y programa/cancela timers de absent/AFK.
-// Nota: usamos targetChannelID para re-renderizar la UI del canal de colas.
 func HandleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceStateUpdate) {
 	vs := vsu.VoiceState
 	if vs == nil {
@@ -409,23 +375,21 @@ func HandleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceStateUpdat
 		return
 	}
 
-	// 1) Desconectado de voz → programa kick por AUSENTE
+	// Desconectado de voz → programa kick por AUSENTE
 	if newChID == "" {
 		scheduleAbsentKick(s, guildID, targetChannelID, userID)
 		cancelAFK(userID)
 		return
 	}
 
-	// 1) AFK primero (siempre)
+	// AFK primero (siempre)
 	if isAfkChannel(s, guildID, newChID) {
 		cancelAbsent(userID)
 		scheduleAFKKick(s, guildID, targetChannelID, userID)
 		return
 	}
 
-	// 2) En alguna voz…
-	//    - si es categoría permitida → cancela "ausente"
-	//    - si además es AFK → programa kick por AFK; si no, cancela AFK
+	// En voz permitida → cancela ausente/AFK según corresponda
 	if channelAllowedByCategory(s, newChID) {
 		cancelAbsent(userID)
 
@@ -441,7 +405,7 @@ func HandleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceStateUpdat
 		return
 	}
 
-	// 3) En voz NO permitida → trata como ausente
+	// Voz NO permitida → trata como ausente
 	scheduleAbsentKick(s, guildID, targetChannelID, userID)
 	cancelAFK(userID)
 }
@@ -457,11 +421,148 @@ func HandleGuildCreate(s *discordgo.Session, ev *discordgo.GuildCreate) {
 	}
 }
 
-// // DEBUG: llena la(s) cola(s) con N jugadores falsos
-// func seedDemoPlayers(n int, channelID string) {
-// 	for i := 1; i <= n; i++ {
-// 		id := fmt.Sprintf("seed-%02d", i)   // IDs sintéticos
-// 		name := fmt.Sprintf("Seed %02d", i) // nombres visibles
-// 		_, _ = qman.JoinAny(channelID, id, name, defaultCapacity)
-// 	}
-// }
+// Quita hasta N jugadores del frente de la primera cola de este canal.
+func removeTopNFromQueue(channelID string, n int) {
+	if n <= 0 {
+		return
+	}
+	qs, err := qman.Queues(channelID)
+	if err != nil || len(qs) == 0 || len(qs[0].Players) == 0 {
+		return
+	}
+	players := qs[0].Players
+	limit := n
+	if len(players) < n {
+		limit = len(players)
+	}
+	for i := 0; i < limit; i++ {
+		_, _ = qman.LeaveAny(channelID, players[i].ID)
+	}
+}
+
+// Publica lista de jugadores actuales en la primera cola
+func announceQueueSnapshot(s *discordgo.Session, channelID string) {
+	qs, err := qman.Queues(channelID)
+	if err != nil || len(qs) == 0 {
+		_, _ = s.ChannelMessageSend(channelID, "📋 No hay colas activas.")
+		return
+	}
+	players := qs[0].Players
+	if len(players) == 0 {
+		_, _ = s.ChannelMessageSend(channelID, "📋 La cola está vacía.")
+		return
+	}
+	var b strings.Builder
+	b.WriteString("📋 **Jugadores en la cola:**\n")
+	for i, p := range players {
+		fmt.Fprintf(&b, "%2d) %s\n", i+1, p.Username) // o usa <@%s> con p.ID si querés mencionar
+	}
+	_, _ = s.ChannelMessageSend(channelID, b.String())
+}
+
+// Lógica de “match started”
+func onMatchStarted(s *discordgo.Session, guildID, channelID string) {
+	// Si veníamos de cola cerrada, purga a los primeros N (capacidad actual)
+	prevOpen := IsQueueOpen(channelID)
+	if !prevOpen {
+		removeTopNFromQueue(channelID, defaultCapacity)
+	}
+
+	// Asegura cola y ábrela
+	_, _ = qman.EnsureFirstQueue(channelID, "Queue #1", defaultCapacity)
+	SetQueueOpen(channelID, true)
+
+	// Render UI
+	if qs, err := qman.Queues(channelID); err == nil {
+		_ = PublishOrEditQueueMessage(s, channelID, renderQueuesEmbed(qs), componentsForQueues(qs))
+	}
+
+	_, _ = s.ChannelMessageSend(channelID, "🟢 **Cola abierta** — usa los botones para unirte/dejar la cola.")
+}
+
+// Lógica de “match finished”
+func onMatchFinished(s *discordgo.Session, guildID, channelID string) {
+	SetQueueOpen(channelID, false)
+	announceQueueSnapshot(s, channelID)
+
+	// Re-render UI (mismo embed; joins bloqueados por lógica)
+	if qs, err := qman.Queues(channelID); err == nil {
+		_ = PublishOrEditQueueMessage(s, channelID, renderQueuesEmbed(qs), componentsForQueues(qs))
+	}
+
+	_, _ = s.ChannelMessageSend(channelID, "🔴 **Cola cerrada** — esperando el próximo **match started**.")
+}
+
+// Devuelve si el mensaje (texto o embeds) contiene los triggers
+func detectPFTriggers(msg *discordgo.Message) (started, finished bool) {
+	txt := strings.ToLower(msg.Content)
+	if strings.Contains(txt, "match started") {
+		started = true
+	}
+	if strings.Contains(txt, "match finished") {
+		finished = true
+	}
+
+	for _, e := range msg.Embeds {
+		t := strings.ToLower(e.Title + " " + e.Description)
+		if strings.Contains(t, "match started") {
+			started = true
+		}
+		if strings.Contains(t, "match finished") {
+			finished = true
+		}
+	}
+	return
+}
+
+// Escucha mensajes del canal de scrims para “match started/finished”
+func HandleMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+	// Ignora SOLO tus propios mensajes para evitar loops
+	if m.Author != nil && m.Author.ID == s.State.User.ID {
+		return
+	}
+	// Limitar al canal configurado (scrims)
+	target := pfAnnounceChannelID
+	if target == "" {
+		target = m.ChannelID
+	}
+	if m.ChannelID != target {
+		return
+	}
+
+	started, finished := detectPFTriggers(m.Message)
+	if started {
+		onMatchStarted(s, m.GuildID, m.ChannelID)
+		return
+	}
+	if finished {
+		onMatchFinished(s, m.GuildID, m.ChannelID)
+		return
+	}
+
+	// (Si también vas a parsear links PopFlash, agregalo acá)
+}
+
+func HandleMessageUpdate(s *discordgo.Session, ev *discordgo.MessageUpdate) {
+	if ev.Author != nil && ev.Author.ID == s.State.User.ID {
+		return
+	}
+	target := pfAnnounceChannelID
+	if target == "" {
+		target = ev.ChannelID
+	}
+	if ev.ChannelID != target {
+		return
+	}
+
+	// ev.Message puede venir parcial, pero normalmente incluye embeds/título
+	started, finished := detectPFTriggers(ev.Message)
+	if started {
+		onMatchStarted(s, ev.GuildID, ev.ChannelID)
+		return
+	}
+	if finished {
+		onMatchFinished(s, ev.GuildID, ev.ChannelID)
+		return
+	}
+}

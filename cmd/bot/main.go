@@ -41,7 +41,7 @@ func main() {
 	}
 
 	// Intents: Guilds (slash) + GuildMessages (solo para el ping temporal)
-	session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildVoiceStates
+	session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildVoiceStates | discordgo.IntentsMessageContent
 
 	// ping temporal (puedes quitarlo luego)
 	session.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -57,6 +57,8 @@ func main() {
 	session.AddHandler(botdiscord.HandleInteraction)
 	session.AddHandler(botdiscord.HandleVoiceStateUpdate)
 	session.AddHandler(botdiscord.HandleGuildCreate)
+	session.AddHandler(botdiscord.HandleMessageCreate)
+	session.AddHandler(botdiscord.HandleMessageUpdate)
 
 	// abrir
 	if err = session.Open(); err != nil {
