@@ -1,29 +1,24 @@
+// Package queue - manager.go
+// Concurrency-safe manager of per-channel, multi-queue sets.
 package queue
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"time"
 )
 
+// Manager keeps per-channel queue sets behind a RWMutex.
 type Manager struct {
 	mu     sync.RWMutex
-	byChan map[string]*channelQueues // channelID -> colas en ese canal
+	byChan map[string]*channelQueues // channelID -> queues in that channel
 }
 
 type channelQueues struct {
-	Queues []*Queue // índice 0-based; mostramos 1-based en UI
+	Queues []*Queue // 0-based indexes; UI can render 1-based
 }
 
-var (
-	ErrExists    = errors.New("queue already exists")
-	ErrNotFound  = errors.New("queue not found")
-	ErrFull      = errors.New("queue is full")
-	ErrAlreadyIn = errors.New("already in queue")
-	ErrNotIn     = errors.New("player not in queue")
-)
-
+// NewManager constructs an empty Manager.
 func NewManager() *Manager {
 	return &Manager{byChan: make(map[string]*channelQueues)}
 }
@@ -37,7 +32,9 @@ func (m *Manager) getOrCreateChannel(channelID string) *channelQueues {
 	return cq
 }
 
-// Asegura que exista la Queue #1
+// EnsureFirstQueue makes sure Queue #1 exists in the given channel.
+// If created, it uses the provided name and capacity; if capacity <= 0,
+// it returns an error (keeps current semantics). Always returns a snapshot.
 func (m *Manager) EnsureFirstQueue(channelID, name string, capacity int) (*Queue, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -45,7 +42,7 @@ func (m *Manager) EnsureFirstQueue(channelID, name string, capacity int) (*Queue
 	cq := m.getOrCreateChannel(channelID)
 	if len(cq.Queues) == 0 {
 		if capacity <= 0 {
-			return nil, errors.New("invalid capacity")
+			return nil, qerr("invalid capacity")
 		}
 		q := &Queue{
 			ID:        fmt.Sprintf("%s:%d", channelID, 1),
@@ -60,7 +57,7 @@ func (m *Manager) EnsureFirstQueue(channelID, name string, capacity int) (*Queue
 	return snapshot(cq.Queues[0]), nil
 }
 
-// Snapshot de todas las colas del canal
+// Queues returns a deep-copy snapshot of all queues in a channel.
 func (m *Manager) Queues(channelID string) ([]*Queue, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -76,14 +73,16 @@ func (m *Manager) Queues(channelID string) ([]*Queue, error) {
 	return out, nil
 }
 
-// JoinAny: mete al jugador en la primera cola con espacio; si no hay, crea otra.
+// JoinAny appends the player to the first queue with space; otherwise it
+// creates a new queue and joins there. Returns the 1-based queue index.
+// If the player is already in any queue, returns ErrAlreadyIn.
 func (m *Manager) JoinAny(channelID, playerID, username string, capacity int) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	cq := m.getOrCreateChannel(channelID)
 
-	// ya está en alguna?
+	// Already present?
 	for idx, q := range cq.Queues {
 		for _, p := range q.Players {
 			if p.ID == playerID {
@@ -92,19 +91,16 @@ func (m *Manager) JoinAny(channelID, playerID, username string, capacity int) (i
 		}
 	}
 
-	// primera con hueco
+	// First queue with room.
+	now := time.Now().UTC()
 	for idx, q := range cq.Queues {
 		if len(q.Players) < q.Capacity {
-			q.Players = append(q.Players, Player{
-				ID:       playerID,
-				Username: username,
-				JoinedAt: time.Now().UTC(),
-			})
+			q.Players = append(q.Players, Player{ID: playerID, Username: username, JoinedAt: now})
 			return idx + 1, nil
 		}
 	}
 
-	// crear nueva
+	// Create a new tail queue.
 	if capacity <= 0 {
 		capacity = 5
 	}
@@ -112,15 +108,17 @@ func (m *Manager) JoinAny(channelID, playerID, username string, capacity int) (i
 	q := &Queue{
 		ID:        fmt.Sprintf("%s:%d", channelID, newIdx),
 		Name:      fmt.Sprintf("Queue #%d", newIdx),
-		Players:   []Player{{ID: playerID, Username: username, JoinedAt: time.Now().UTC()}},
-		CreatedAt: time.Now().UTC(),
+		Players:   []Player{{ID: playerID, Username: username, JoinedAt: now}},
+		CreatedAt: now,
 		Capacity:  capacity,
 	}
 	cq.Queues = append(cq.Queues, q)
 	return newIdx, nil
 }
 
-// LeaveAny: saca al jugador de la cola en que esté y re-balancea promoviendo.
+// LeaveAny removes the player from whichever queue they are in, then
+// rebalances forward. Returns the 1-based queue index from which the
+// player was removed.
 func (m *Manager) LeaveAny(channelID, playerID string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -129,29 +127,21 @@ func (m *Manager) LeaveAny(channelID, playerID string) (int, error) {
 	if !ok {
 		return 0, ErrNotFound
 	}
-
-	foundIdx := -1
-	for idx, q := range cq.Queues {
-		for i, p := range q.Players {
-			if p.ID == playerID {
-				q.Players = append(q.Players[:i], q.Players[i+1:]...)
-				foundIdx = idx
-				break
-			}
-		}
-		if foundIdx >= 0 {
-			break
-		}
-	}
-	if foundIdx < 0 {
+	qi, pi := locatePlayer(cq.Queues, playerID)
+	if qi < 0 {
 		return 0, ErrNotIn
 	}
 
-	m.rebalance(cq) // PROMOVER: Q2->Q1, Q3->Q2, ...
-	return foundIdx + 1, nil
+	q := cq.Queues[qi]
+	q.Players = append(q.Players[:pi], q.Players[pi+1:]...)
+
+	rebalanceForward(cq.Queues, qi)
+	cq.Queues = pruneTrailingEmpty(cq.Queues)
+
+	return qi + 1, nil
 }
 
-// ResetAt: vacía SOLO la cola idx (1-based) y rebalancea.
+// ResetAt clears only the indicated queue (1-based index) and rebalances.
 func (m *Manager) ResetAt(channelID string, idx int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -160,12 +150,14 @@ func (m *Manager) ResetAt(channelID string, idx int) error {
 	if !ok || idx <= 0 || idx > len(cq.Queues) {
 		return ErrNotFound
 	}
-	cq.Queues[idx-1].Players = []Player{}
-	m.rebalance(cq)
+	cq.Queues[idx-1].Players = cq.Queues[idx-1].Players[:0]
+	rebalanceForward(cq.Queues, idx-1)
+	cq.Queues = pruneTrailingEmpty(cq.Queues)
 	return nil
 }
 
-// DeleteAt: elimina SOLO la cola idx (1-based) y rebalancea.
+// DeleteAt removes the indicated queue (1-based index) and then rebalances.
+// If the last queues become empty, trailing empties are pruned.
 func (m *Manager) DeleteAt(channelID string, idx int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -175,31 +167,17 @@ func (m *Manager) DeleteAt(channelID string, idx int) error {
 		return ErrNotFound
 	}
 	cq.Queues = append(cq.Queues[:idx-1], cq.Queues[idx:]...)
-	m.rebalance(cq)
+	// After removing an entire queue, rebalancing from the previous index
+	// keeps earlier queues as full as possible.
+	rebalanceForward(cq.Queues, max(0, idx-2))
+	cq.Queues = pruneTrailingEmpty(cq.Queues)
 	return nil
 }
 
-// ===== helpers =====
-
-func (m *Manager) rebalance(cq *channelQueues) {
-	// Para cada cola j, mientras haya hueco, traer del primer jugador de j+1
-	for j := 0; j < len(cq.Queues)-1; j++ {
-		for len(cq.Queues[j].Players) < cq.Queues[j].Capacity && len(cq.Queues[j+1].Players) > 0 {
-			// pop front de j+1
-			p := cq.Queues[j+1].Players[0]
-			cq.Queues[j+1].Players = cq.Queues[j+1].Players[1:]
-			// push a j (preservando orden)
-			cq.Queues[j].Players = append(cq.Queues[j].Players, p)
-		}
+// tiny util
+func max(a, b int) int {
+	if a > b {
+		return a
 	}
-	// Eliminar colas vacías al final (dejar al menos una)
-	for len(cq.Queues) > 1 && len(cq.Queues[len(cq.Queues)-1].Players) == 0 {
-		cq.Queues = cq.Queues[:len(cq.Queues)-1]
-	}
-}
-
-func snapshot(q *Queue) *Queue {
-	cp := *q
-	cp.Players = append([]Player(nil), q.Players...)
-	return &cp
+	return b
 }

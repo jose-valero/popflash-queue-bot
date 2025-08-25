@@ -1,0 +1,51 @@
+# cmd/
+#   bot/
+#     main.go                 # arranque y wiring
+
+# internal/
+#   app/
+#     bot.go                  # struct Bot (estado y handlers registrados)
+#     router.go               # “rutas” de slash/components delegando a servicios
+#     middleware/
+#       cooldown.go           # anti-spam por usuario
+#       channel_guard.go      # fuerza canal objetivo
+#       privileged.go         # check de permisos (roles/Admin)
+#   domain/
+#     queue/
+#       models.go             # Queue, Player
+#       manager.go            # lógica actual, pura (ya la tienes)
+#       manager_test.go
+#     events/
+#       bus.go                # pub/sub in-process (cola abierta, join, leave, reset…)
+#       types.go              # tipos de evento
+#   ports/                    # contratos (interfaces) que usa la capa app
+#     popflash.go             # Start/Finish stream
+#     store.go                # persistencia (queues, messageIDs, settings)
+#     ui.go                   # renderer de UI (embed+components)
+#     policy.go               # reglas (permisos, voz)
+#     publisher.go            # editar/publicar mensajes sin interacción
+#   adapters/                 # implementaciones concretas de los ports
+#     discord/
+#       ui_renderer.go        # render de embed + components
+#       publisher.go          # ChannelMessageEditComplex / PublishOrEdit
+#       policy.go             # isPrivileged, reglas de voz (leyendo env)
+#       handlers/
+#         interactions.go     # glue: llama a app/router con middleware
+#         messages.go         # detector match started/finished (si lees desde canal)
+#         voice.go            # VoiceStateUpdate → timers ausente/AFK
+#     popflash/
+#       client.go             # cliente REST/webhook → emite eventos en bus
+#     store/
+#       memory/
+#         store.go            # en memoria (arranque rápido)
+#       bolt/ (o sqlite/)
+#         store.go            # persistente
+#   ui/                       # helpers puros de UI
+#     embed.go                # renderQueuesEmbed (puro, sin discordgo si quieres)
+#     components.go           # componentsForQueues
+#   infra/
+#     config/
+#       config.go             # carga de env (validación, defaults)
+#   pkg/
+#     logger/
+#       logger.go             # zap/log/slog; opcional
