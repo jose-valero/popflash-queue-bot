@@ -45,15 +45,19 @@ func PublishOrEditQueueMessage(s *discordgo.Session, channelID string, emb *disc
 func EditQueueMessage(s *discordgo.Session, channelID string, emb *discordgo.MessageEmbed, comps []discordgo.MessageComponent) error {
 	msgID, ok := getQueueMessageID(channelID)
 	if !ok {
-		return nil // first message not published yet
+		return nil
 	}
 	embeds := []*discordgo.MessageEmbed{emb}
 	compsCopy := comps
 	_, err := s.ChannelMessageEditComplex(&discordgo.MessageEdit{
-		Channel:    channelID,
-		ID:         msgID,
-		Embeds:     &embeds,
-		Components: &compsCopy,
+		Channel: channelID, ID: msgID, Embeds: &embeds, Components: &compsCopy,
 	})
+	if err != nil {
+		// Fallback si el mensaje ya no existe (Discord code 10008)
+		if re, ok := err.(*discordgo.RESTError); ok && re.Message != nil && re.Message.Code == 10008 {
+			queueMsgIDs.Delete(channelID)
+			return PublishOrEditQueueMessage(s, channelID, emb, comps)
+		}
+	}
 	return err
 }

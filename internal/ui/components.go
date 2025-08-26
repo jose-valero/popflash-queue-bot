@@ -1,6 +1,4 @@
 // internal/ui/components.go
-// Build Discord components (buttons/select-menus) for the queues UI.
-
 package ui
 
 import (
@@ -10,12 +8,10 @@ import (
 	"github.com/jose-valero/popflash-queue-bot/internal/queue"
 )
 
-// ComponentsForQueues returns rows for:
-//   - Row 1: Join / Leave
-//   - Row 2: Queue actions (Reset/Close per queue) — optional when there are queues
-//   - Row 3: Kick select (up to 25 players) — optional when there are players
-func ComponentsForQueues(qs []*queue.Queue) []discordgo.MessageComponent {
-	components := []discordgo.MessageComponent{
+// ---------- PÚBLICO: solo Join/Leave + botón "Admin…" ----------
+
+func ComponentsForQueues(qs []*queue.Queue, isOpen bool) []discordgo.MessageComponent {
+	return []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
 				discordgo.Button{
@@ -23,6 +19,7 @@ func ComponentsForQueues(qs []*queue.Queue) []discordgo.MessageComponent {
 					Style:    discordgo.PrimaryButton,
 					CustomID: "queue_join",
 					Emoji:    &discordgo.ComponentEmoji{Name: "🌕"},
+					Disabled: !isOpen, // si la cola está cerrada, deshabilita el join
 				},
 				discordgo.Button{
 					Label:    "Chau",
@@ -30,28 +27,46 @@ func ComponentsForQueues(qs []*queue.Queue) []discordgo.MessageComponent {
 					CustomID: "queue_leave",
 					Emoji:    &discordgo.ComponentEmoji{Name: "👋"},
 				},
+				// visible para todos; solo los admins verán/usaràn el panel efímero
+				discordgo.Button{
+					Label:    "Admin…",
+					Style:    discordgo.SecondaryButton,
+					CustomID: "admin_panel",
+					Emoji:    &discordgo.ComponentEmoji{Name: "👮"},
+				},
 			},
 		},
 	}
+}
 
+// ---------- ADMIN (EFÍMERO): solo selects (acciones + kick) ----------
+
+func AdminComponentsForQueues(qs []*queue.Queue) []discordgo.MessageComponent {
+	comps := make([]discordgo.MessageComponent, 0, 2)
+
+	// Select de acciones por cola (Reset / Close). Cap a 12 colas (24 opciones).
 	if len(qs) > 0 {
-		opts := make([]discordgo.SelectMenuOption, 0, len(qs)*2)
-		for idx := range qs {
-			n := idx + 1
+		n := len(qs)
+		if n > 12 {
+			n = 12
+		}
+		opts := make([]discordgo.SelectMenuOption, 0, n*2)
+		for idx := 0; idx < n; idx++ {
+			k := idx + 1
 			opts = append(opts,
 				discordgo.SelectMenuOption{
-					Label:       fmt.Sprintf("Reset Q#%d", n),
-					Value:       fmt.Sprintf("reset:%d", n),
+					Label:       fmt.Sprintf("Reset Q#%d", k),
+					Value:       fmt.Sprintf("reset:%d", k),
 					Description: "Clear that queue",
 				},
 				discordgo.SelectMenuOption{
-					Label:       fmt.Sprintf("Close Q#%d", n),
-					Value:       fmt.Sprintf("close:%d", n),
+					Label:       fmt.Sprintf("Close Q#%d", k),
+					Value:       fmt.Sprintf("close:%d", k),
 					Description: "Delete that queue",
 				},
 			)
 		}
-		components = append(components, discordgo.ActionsRow{
+		comps = append(comps, discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
 				discordgo.SelectMenu{
 					CustomID:    "queue_action",
@@ -62,24 +77,24 @@ func ComponentsForQueues(qs []*queue.Queue) []discordgo.MessageComponent {
 		})
 	}
 
-	// Kick select (admins only at runtime; UI always rendered for now)
-	if hasAnyPlayers(qs) {
-		kopts := kickOptions(qs)
-		if len(kopts) > 0 {
-			components = append(components, discordgo.ActionsRow{
-				Components: []discordgo.MessageComponent{
-					discordgo.SelectMenu{
-						CustomID:    "queue_kick",
-						Placeholder: "Kick a player…",
-						Options:     kopts,
-					},
+	// Select de Kick (hasta 25 players)
+	kopts := kickOptions(qs)
+	if len(kopts) > 0 {
+		comps = append(comps, discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.SelectMenu{
+					CustomID:    "queue_kick",
+					Placeholder: "Kick a player…",
+					Options:     kopts,
 				},
-			})
-		}
+			},
+		})
 	}
 
-	return components
+	return comps
 }
+
+// ---------- helpers ----------
 
 func hasAnyPlayers(qs []*queue.Queue) bool {
 	for _, q := range qs {

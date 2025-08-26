@@ -71,48 +71,53 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	switch name {
 
 	case "startqueue":
+		if !d.IsPrivileged(i) {
+			_ = d.SendEphemeral(s, i, "Solo admins pueden abrir la cola.")
+			return
+		}
 		if _, err := qman.EnsureFirstQueue(queueID, "Queue #1", defaultCapacity); err != nil {
 			_ = d.SendEphemeral(s, i, "⚠️ "+err.Error())
 			return
 		}
-
-		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
-		}); err != nil {
-			log.Printf("defer error: %v", err)
-			return
-		}
-
-		qs, _ := qman.Queues(queueID)
-		embeds := []*discordgo.MessageEmbed{ui.RenderQueuesEmbed(qs)}
-		comps := ui.ComponentsForQueues(qs)
-
-		msg, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-			Embeds:     &embeds,
-			Components: &comps,
-		})
-		if err != nil {
-			log.Printf("edit original response error: %v", err)
-			_, _ = s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
-				Content: "⚠️ Could not render the queue.",
-			})
-			return
-		}
-
+		// abrir ANTES de renderizar para que salga habilitado el boton
 		SetQueueOpen(queueID, true)
-		if msg != nil {
-			d.SetQueueMessageID(queueID, msg.ID)
+
+		// 1) Responder EFÍMERO para cumplir el ACK en <3s (no crea mensaje público)
+		if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Flags:   discordgo.MessageFlagsEphemeral,
+				Content: "✅ Queue ready.",
+			},
+		}); err != nil {
+			log.Printf("respond error: %v", err)
+			return
+		}
+
+		// 2) Publicar/editar el mensaje PÚBLICO con nuestra UI y RECORDAR SU ID
+		qs, _ := qman.Queues(queueID)
+		if err := d.PublishOrEditQueueMessage(
+			s, queueID,
+			ui.RenderQueuesEmbed(qs),
+			ui.ComponentsForQueues(qs, IsQueueOpen(queueID)),
+		); err != nil {
+			log.Printf("PublishOrEditQueueMessage error: %v", err)
 		}
 		return
 
 	case "joinqueue":
 		u := d.UserOf(i)
+
 		if u == nil {
 			_ = d.SendEphemeral(s, i, "⚠️ Could not identify you.")
 			return
 		}
 		if !IsQueueOpen(queueID) {
 			_ = d.SendEphemeral(s, i, "🔒 Queue is closed. Wait for the next **match started**.")
+			return
+		}
+		if d.VoiceRequireToJoin() && !d.IsUserInAllowedVoice(s, i.GuildID, u.ID) {
+			_ = d.SendEphemeral(s, i, "🔇 You must be in an allowed voice channel to join.")
 			return
 		}
 		if _, err := qman.JoinAny(queueID, u.ID, u.Username, defaultCapacity); err != nil {
@@ -148,7 +153,13 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	case "queue":
 		if qs, err := qman.Queues(queueID); err == nil {
-			_ = d.SendEphemeralEmbed(s, i, ui.RenderQueuesEmbed(qs))
+			if d.IsPrivileged(i) {
+				// Admin: embed + selects solo para él (efímero)
+				_ = d.SendEphemeralComplex(s, i, ui.RenderQueuesEmbed(qs), ui.AdminComponentsForQueues(qs))
+			} else {
+				// No admin: solo embed efímero (sin selects)
+				_ = d.SendEphemeralEmbed(s, i, ui.RenderQueuesEmbed(qs))
+			}
 		} else {
 			_ = d.SendEphemeral(s, i, "⚠️ No active queues.")
 		}
@@ -170,7 +181,11 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	log.Printf("[component] %s by %s", customID, d.SafeName(u))
 
 	// Select: actions per queue ("reset:N" / "close:N")
+
 	if customID == "queue_action" {
+		if !d.RequirePrivileged(s, i) {
+			return
+		}
 		vals := i.MessageComponentData().Values
 		if len(vals) == 0 {
 			_ = d.SendEphemeral(s, i, "⚠️ Invalid selection.")
@@ -205,6 +220,9 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	// Select: kick ("uid:<userID>")
 	if customID == "queue_kick" {
+		if !d.RequirePrivileged(s, i) {
+			return
+		}
 		vals := i.MessageComponentData().Values
 		if len(vals) == 0 {
 			_ = d.SendEphemeral(s, i, "⚠️ Invalid selection.")
@@ -240,6 +258,10 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			_ = d.SendEphemeral(s, i, "🔒 Queue is closed. Wait for the next **match started**.")
 			return
 		}
+		if d.VoiceRequireToJoin() && !d.IsUserInAllowedVoice(s, i.GuildID, u.ID) {
+			_ = d.SendEphemeral(s, i, "🔇 You must be in an allowed voice channel to join.")
+			return
+		}
 		if _, err := qman.JoinAny(queueID, u.ID, u.Username, defaultCapacity); err != nil {
 			if errors.Is(err, queue.ErrAlreadyIn) {
 				_ = d.SendEphemeral(s, i, "You're already in a queue.")
@@ -269,7 +291,23 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		_ = d.SendEphemeral(s, i, "👋 Left.")
 		updateUIAfterChange(s, i, queueID)
 		return
+
+	case "admin_panel":
+		if !d.RequirePrivileged(s, i) {
+			return
+		}
+		if qs, err := qman.Queues(queueID); err == nil && len(qs) > 0 {
+			_ = d.SendEphemeralComplex(
+				s, i,
+				ui.RenderQueuesEmbed(qs),
+				ui.AdminComponentsForQueues(qs),
+			)
+		} else {
+			_ = d.SendEphemeral(s, i, "⚠️ No active queues.")
+		}
+		return
 	}
+
 }
 
 // updateUIAfterChange refreshes the public embed+components OUTSIDE the interaction.
@@ -295,11 +333,11 @@ func updateUIAfterChange(s *discordgo.Session, _ *discordgo.InteractionCreate, c
 
 	if err == nil && len(qs) > 0 {
 		emb = ui.RenderQueuesEmbed(qs)
-		comps = ui.ComponentsForQueues(qs)
+		comps = ui.ComponentsForQueues(qs, IsQueueOpen(channelID))
 	} else {
 		// Fallback (shouldn’t normally happen after EnsureFirstQueue)
 		emb = ui.RenderQueuesEmbed(nil)
-		comps = ui.ComponentsForQueues(nil)
+		comps = ui.ComponentsForQueues(nil, IsQueueOpen(channelID))
 	}
 
 	if err2 := d.EditQueueMessage(s, channelID, emb, comps); err2 != nil {

@@ -50,6 +50,21 @@ func SendEphemeralEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, em
 	return err
 }
 
+func SendEphemeralComplex(s *discordgo.Session, i *discordgo.InteractionCreate, emb *discordgo.MessageEmbed, comps []discordgo.MessageComponent) error {
+	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{emb},
+			Components: comps,
+			Flags:      1 << 6, // ephemeral
+		},
+	})
+	if err != nil {
+		log.Printf("SendEphemeralComplex error: %v", err)
+	}
+	return err
+}
+
 // UpdateEmbedWithComponents updates the original message of the interaction.
 func UpdateEmbedWithComponents(s *discordgo.Session, i *discordgo.InteractionCreate, emb *discordgo.MessageEmbed, comps []discordgo.MessageComponent) error {
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{

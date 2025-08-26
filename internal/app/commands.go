@@ -28,10 +28,6 @@ var commands = []*discordgo.ApplicationCommand{
 
 // RegisterCommands creates (or updates) guild-level commands.
 func RegisterCommands(s *discordgo.Session, appID, guildID string) error {
-	for _, c := range commands {
-		if _, err := s.ApplicationCommandCreate(appID, guildID, c); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := s.ApplicationCommandBulkOverwrite(appID, guildID, commands)
+	return err
 }

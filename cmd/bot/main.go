@@ -38,6 +38,12 @@ func main() {
 		log.Fatalf("discord session error: %v", err)
 	}
 
+	// ⬇️ Intents necesarios
+	sess.Identify.Intents = discordgo.IntentsGuilds |
+		discordgo.IntentsGuildMessages | // para MessageCreate/Update en canales
+		discordgo.IntentsMessageContent | // para leer "match started/finished" en el texto
+		discordgo.IntentsGuildVoiceStates // si usas la política de voz
+
 	// instance the app Bot and register all handlers
 	// this layer keeps wiring serparete from domain
 	b := app.NewBot(sess, cfg)
