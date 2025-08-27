@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 
@@ -22,7 +23,23 @@ var (
 )
 
 // channel open/close flag for joins
-var queueOpen sync.Map // channelID -> bool
+var queueOpen sync.Map        // channelID -> bool
+var seenInteractions sync.Map // id -> struct{}
+
+func alreadyHandled(i *discordgo.InteractionCreate) bool {
+	// i.ID es único por interacción (botón/selección/slash)
+	key := i.ID
+	if key == "" {
+		return false
+	}
+	if _, loaded := seenInteractions.LoadOrStore(key, struct{}{}); loaded {
+		log.Printf("[dedupe] ignoring duplicate interaction id=%s", key)
+		return true
+	}
+	// Limpieza por si acaso
+	time.AfterFunc(30*time.Second, func() { seenInteractions.Delete(key) })
+	return false
+}
 
 func SetQueueOpen(channelID string, open bool) {
 	if channelID == "" {
@@ -48,6 +65,9 @@ func SetRuntimeConfig(channelID string, capacity int) {
 }
 
 func HandleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if alreadyHandled(i) {
+		return
+	}
 	switch i.Type {
 	case discordgo.InteractionApplicationCommand:
 		handleSlash(s, i)
@@ -98,7 +118,7 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		qs, _ := qman.Queues(queueID)
 		if err := d.PublishOrEditQueueMessage(
 			s, queueID,
-			ui.RenderQueuesEmbed(qs),
+			ui.RenderQueuesEmbed(qs, IsQueueOpen(queueID)),
 			ui.ComponentsForQueues(qs, IsQueueOpen(queueID)),
 		); err != nil {
 			log.Printf("PublishOrEditQueueMessage error: %v", err)
@@ -155,10 +175,10 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if qs, err := qman.Queues(queueID); err == nil {
 			if d.IsPrivileged(i) {
 				// Admin: embed + selects solo para él (efímero)
-				_ = d.SendEphemeralComplex(s, i, ui.RenderQueuesEmbed(qs), ui.AdminComponentsForQueues(qs))
+				_ = d.SendEphemeralComplex(s, i, ui.RenderQueuesEmbed(qs, IsQueueOpen(queueID)), ui.AdminComponentsForQueues(qs))
 			} else {
 				// No admin: solo embed efímero (sin selects)
-				_ = d.SendEphemeralEmbed(s, i, ui.RenderQueuesEmbed(qs))
+				_ = d.SendEphemeralEmbed(s, i, ui.RenderQueuesEmbed(qs, IsQueueOpen(queueID)))
 			}
 		} else {
 			_ = d.SendEphemeral(s, i, "⚠️ No active queues.")
@@ -299,7 +319,7 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if qs, err := qman.Queues(queueID); err == nil && len(qs) > 0 {
 			_ = d.SendEphemeralComplex(
 				s, i,
-				ui.RenderQueuesEmbed(qs),
+				ui.RenderQueuesEmbed(qs, IsQueueOpen(queueID)),
 				ui.AdminComponentsForQueues(qs),
 			)
 		} else {
@@ -332,11 +352,11 @@ func updateUIAfterChange(s *discordgo.Session, _ *discordgo.InteractionCreate, c
 	var comps []discordgo.MessageComponent
 
 	if err == nil && len(qs) > 0 {
-		emb = ui.RenderQueuesEmbed(qs)
+		emb = ui.RenderQueuesEmbed(qs, IsQueueOpen(channelID))
 		comps = ui.ComponentsForQueues(qs, IsQueueOpen(channelID))
 	} else {
 		// Fallback (shouldn’t normally happen after EnsureFirstQueue)
-		emb = ui.RenderQueuesEmbed(nil)
+		emb = ui.RenderQueuesEmbed(nil, IsQueueOpen(channelID))
 		comps = ui.ComponentsForQueues(nil, IsQueueOpen(channelID))
 	}
 

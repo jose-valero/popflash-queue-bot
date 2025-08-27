@@ -12,12 +12,26 @@ import (
 )
 
 // RenderQueuesEmbed builds a single embed showing all queues in a channel.
-func RenderQueuesEmbed(qs []*queue.Queue) *discordgo.MessageEmbed {
+func RenderQueuesEmbed(qs []*queue.Queue, open bool) *discordgo.MessageEmbed {
+	footer := &discordgo.MessageEmbedFooter{
+		Text: map[bool]string{
+			true:  "🔓 Cola abierta — no pierdas tu slot",
+			false: "🔒 Cola cerrada — espera la próxima partida",
+		}[open],
+	}
+
+	// Si no querés cambiar color, dejá ambos en 0xB069FF.
+	color := map[bool]int{
+		true:  0x57F287, // verde cuando abierta
+		false: 0x808080, // gris cuando cerrada
+	}[open]
+
 	if len(qs) == 0 {
 		return &discordgo.MessageEmbed{
 			Title:       "❌ No queues",
 			Description: "Use `/startqueue` to create the first one.",
-			Color:       0xED4245,
+			Color:       color,
+			Footer:      footer,
 		}
 	}
 
@@ -37,9 +51,7 @@ func RenderQueuesEmbed(qs []*queue.Queue) *discordgo.MessageEmbed {
 	return &discordgo.MessageEmbed{
 		Title:       fmt.Sprintf("Ellos la llevan — %d queue(s)", len(qs)),
 		Description: b.String(),
-		Color:       0xB069FF,
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "XCG BOT • don't lose your spot",
-		},
+		Color:       color,
+		Footer:      footer,
 	}
 }

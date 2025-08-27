@@ -12,6 +12,13 @@ var (
 	subs = map[string][]subscriber{} // nombre de tipo -> subs
 )
 
+func Count[T any]() int {
+	name := typeNameOf[T]()
+	mu.RLock()
+	defer mu.RUnlock()
+	return len(subs[name])
+}
+
 func typeNameOf[T any]() string {
 	var zero *T
 	rt := reflect.TypeOf(zero).Elem() // *T -> T, sin dereferenciar nil

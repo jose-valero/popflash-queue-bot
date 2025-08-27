@@ -1,10 +1,3 @@
-// Command bot start the discord bot process
-//
-// this binary:
-//  1. Load config from enviroment variables (.env during dev)
-//  2. creates a discord session
-//  3. registers the app handlers
-//  4. open connection to gatewaya connection and waits a signal from OS to exit
 package main
 
 import (
@@ -20,46 +13,50 @@ import (
 	"github.com/jose-valero/popflash-queue-bot/pkg/config"
 )
 
-func main() {
-	// load .env from local development.
-	_ = godotenv.Load()
+func mustSingleInstanceLock() func() {
+	f, err := os.OpenFile("/tmp/popflashbot.lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		log.Fatalf("lock open: %v", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		log.Fatalf("another instance is already running (lock busy)")
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}
+}
 
-	// read and validate the minimal config to work
+func main() {
+	unlock := mustSingleInstanceLock()
+	defer unlock()
+
+	_ = godotenv.Load()
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config error: %v", err)
 	}
 
-	// create a session of discord
-	//  the prefix "Bot " is required form bot tokens
 	sess, err := discordgo.New("Bot " + cfg.Token)
-
 	if err != nil {
 		log.Fatalf("discord session error: %v", err)
 	}
 
-	// ⬇️ Intents necesarios
 	sess.Identify.Intents = discordgo.IntentsGuilds |
-		discordgo.IntentsGuildMessages | // para MessageCreate/Update en canales
-		discordgo.IntentsMessageContent | // para leer "match started/finished" en el texto
-		discordgo.IntentsGuildVoiceStates // si usas la política de voz
+		discordgo.IntentsGuildMessages |
+		discordgo.IntentsMessageContent |
+		discordgo.IntentsGuildVoiceStates
 
-	// instance the app Bot and register all handlers
-	// this layer keeps wiring serparete from domain
 	b := app.NewBot(sess, cfg)
 	b.RegisterHandlers()
 
-	// open websocket gateway
 	if err := sess.Open(); err != nil {
 		log.Fatalf("open gateway error: %v", err)
 	}
-
-	defer sess.Close() //--> close de connection to leave
+	defer sess.Close()
 
 	log.Printf("🤖 bot ready - %s", cfg.Redacted())
 
-	// block the process till get SIGINT/SIGTEM
-	// this allow a clean shutdown (Ctrl+c, kill, etc)
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	<-stop
