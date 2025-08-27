@@ -3,6 +3,8 @@ package app
 
 import "github.com/bwmarrin/discordgo"
 
+var adminPerms int64 = discordgo.PermissionAdministrator
+
 var commands = []*discordgo.ApplicationCommand{
 	{
 		Name:        "startqueue",
@@ -23,6 +25,33 @@ var commands = []*discordgo.ApplicationCommand{
 		Name:        "queue",
 		Description: "Show queue status",
 		Type:        discordgo.ChatApplicationCommand,
+	},
+	{
+		Name:                     "seedqueue",
+		Description:              "Agrega N jugadores mock a las colas (dev only)",
+		Type:                     discordgo.ChatApplicationCommand,
+		DefaultMemberPermissions: &adminPerms,
+
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionInteger,
+				Name:        "n",
+				Description: "Cantidad de jugadores mock a agregar",
+				Required:    false, // default 12
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "prefix",
+				Description: "Prefijo de los mocks (default: mock)",
+				Required:    false,
+			},
+		},
+	},
+	{
+		Name:                     "clearmocks",
+		Description:              "Quita todos los jugadores mock de las colas (dev only)",
+		Type:                     discordgo.ChatApplicationCommand,
+		DefaultMemberPermissions: &adminPerms,
 	},
 }
 

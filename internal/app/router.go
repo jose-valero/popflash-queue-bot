@@ -3,6 +3,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -184,6 +185,69 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			_ = d.SendEphemeral(s, i, "⚠️ No active queues.")
 		}
 		return
+	case "seedqueue":
+		if !d.IsPrivileged(i) {
+			_ = d.SendEphemeral(s, i, "Solo admins.")
+			return
+		}
+		// defaults
+		n := 12
+		prefix := "mock"
+
+		opts := i.ApplicationCommandData().Options
+		for _, o := range opts {
+			switch o.Name {
+			case "n":
+				if o.IntValue() > 0 {
+					n = int(o.IntValue())
+				}
+			case "prefix":
+				if o.StringValue() != "" {
+					prefix = o.StringValue()
+				}
+			}
+		}
+
+		// Asegura que exista la Q#1
+		if _, err := qman.EnsureFirstQueue(queueID, "Queue #1", defaultCapacity); err != nil {
+			_ = d.SendEphemeral(s, i, "⚠️ "+err.Error())
+			return
+		}
+
+		// Agrega N jugadores mock distribuidos con JoinAny
+		now := time.Now().UnixNano()
+		for k := 0; k < n; k++ {
+			// IDs únicos y fáciles de limpiar luego
+			uid := fmt.Sprintf("%s:%d:%d", prefix, now, k)
+			uname := fmt.Sprintf("%s-%02d", prefix, k+1)
+			_, _ = qman.JoinAny(queueID, uid, uname, defaultCapacity)
+		}
+
+		_ = d.SendEphemeral(s, i, fmt.Sprintf("✅ Se agregaron %d jugadores %q.", n, prefix))
+		updateUIAfterChange(s, i, queueID)
+		return
+
+	case "clearmocks":
+		if !d.IsPrivileged(i) {
+			_ = d.SendEphemeral(s, i, "Solo admins.")
+			return
+		}
+		// Remueve cualquier jugador cuyo ID empiece con "mock:" (o el prefijo que uses)
+		removed := 0
+		if qs, err := qman.Queues(queueID); err == nil {
+			for _, q := range qs {
+				for _, p := range q.Players {
+					if strings.HasPrefix(p.ID, "mock:") || strings.HasPrefix(p.ID, "mock") {
+						if _, err := qman.LeaveAny(queueID, p.ID); err == nil {
+							removed++
+						}
+					}
+				}
+			}
+		}
+		_ = d.SendEphemeral(s, i, fmt.Sprintf("🧹 Quitados %d jugadores mock.", removed))
+		updateUIAfterChange(s, i, queueID)
+		return
 	}
 }
 
@@ -267,9 +331,7 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	switch customID {
-
-	case "queue_join":
+	if strings.HasPrefix(customID, "queue_join") {
 		if u == nil {
 			_ = d.SendEphemeral(s, i, "⚠️ Could not identify you.")
 			return
@@ -293,6 +355,34 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		_ = d.SendEphemeral(s, i, "🙌 Joined!")
 		updateUIAfterChange(s, i, queueID)
 		return
+	}
+
+	switch customID {
+
+	// case "queue_join":
+	// 	if u == nil {
+	// 		_ = d.SendEphemeral(s, i, "⚠️ Could not identify you.")
+	// 		return
+	// 	}
+	// 	if !IsQueueOpen(queueID) {
+	// 		_ = d.SendEphemeral(s, i, "🔒 Queue is closed. Wait for the next **match started**.")
+	// 		return
+	// 	}
+	// 	if d.VoiceRequireToJoin() && !d.IsUserInAllowedVoice(s, i.GuildID, u.ID) {
+	// 		_ = d.SendEphemeral(s, i, "🔇 You must be in an allowed voice channel to join.")
+	// 		return
+	// 	}
+	// 	if _, err := qman.JoinAny(queueID, u.ID, u.Username, defaultCapacity); err != nil {
+	// 		if errors.Is(err, queue.ErrAlreadyIn) {
+	// 			_ = d.SendEphemeral(s, i, "You're already in a queue.")
+	// 			return
+	// 		}
+	// 		_ = d.SendEphemeral(s, i, "⚠️ "+err.Error())
+	// 		return
+	// 	}
+	// 	_ = d.SendEphemeral(s, i, "🙌 Joined!")
+	// 	updateUIAfterChange(s, i, queueID)
+	// 	return
 
 	case "queue_leave":
 		if u == nil {
@@ -341,7 +431,6 @@ func updateUIAfterChange(s *discordgo.Session, _ *discordgo.InteractionCreate, c
 
 	qs, err = qman.Queues(channelID)
 	if errors.Is(err, queue.ErrNotFound) {
-		// Make sure we always show “Queue #1 (0/N)” rather than “No queues”.
 		if q, e2 := qman.EnsureFirstQueue(channelID, "Queue #1", defaultCapacity); e2 == nil && q != nil {
 			qs = []*queue.Queue{q}
 			err = nil

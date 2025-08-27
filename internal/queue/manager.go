@@ -174,6 +174,36 @@ func (m *Manager) DeleteAt(channelID string, idx int) error {
 	return nil
 }
 
+// En queue.Manager (ejemplo orientativo)
+func (m *Manager) PopFromFirst(channelID string, n int) ([]Player, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cq, ok := m.byChan[channelID]
+	if !ok || len(cq.Queues) == 0 {
+		return nil, ErrNotFound
+	}
+
+	q := cq.Queues[0]
+	k := min(n, len(q.Players))
+	popped := append([]Player(nil), q.Players[:k]...)
+	q.Players = append([]Player{}, q.Players[k:]...)
+
+	// Rebalance si querés, pero NO borres Q#1 aunque quede vacía
+	rebalanceForward(cq.Queues, 0)
+	// Si hay colas vacías al final > Q#1, podés podarlas:
+	if len(cq.Queues) > 1 {
+		cq.Queues = pruneTrailingEmpty(cq.Queues)
+	}
+	// Garantía: al menos Q#1 existe
+	if len(cq.Queues) == 0 {
+		cq.Queues = []*Queue{q}
+		q.Players = q.Players[:0]
+	}
+
+	return popped, nil
+}
+
 // tiny util
 func max(a, b int) int {
 	if a > b {

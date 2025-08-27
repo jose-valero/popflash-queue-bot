@@ -8,16 +8,18 @@ import (
 	"github.com/jose-valero/popflash-queue-bot/internal/queue"
 )
 
-// ---------- PÚBLICO: solo Join/Leave + botón "Admin…" ----------
-
 func ComponentsForQueues(qs []*queue.Queue, isOpen bool) []discordgo.MessageComponent {
+	joinID := "queue_join:open"
+	if !isOpen {
+		joinID = "queue_join:closed"
+	}
 	return []discordgo.MessageComponent{
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
 				discordgo.Button{
 					Label:    "La Llevo",
 					Style:    discordgo.PrimaryButton,
-					CustomID: "queue_join",
+					CustomID: joinID,
 					Emoji:    &discordgo.ComponentEmoji{Name: "🌕"},
 					Disabled: !isOpen, // si la cola está cerrada, deshabilita el join
 				},
