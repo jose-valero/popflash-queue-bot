@@ -49,9 +49,21 @@ func (b *Bot) StartEventSubscribers() func() {
 			}
 
 			// Si hay cliente PF y tenemos MatchID, hidrata y guarda card activa
-			if b.PF != nil && ev.MatchID != "" {
-				if card, err := b.PF.MatchCard(context.Background(), ev.MatchID); err == nil {
-					ActivePut(card)
+			if ev.MatchID != "" {
+				if b.PF != nil {
+					if card, err := b.PF.MatchCard(context.Background(), ev.MatchID); err == nil {
+						ActivePut(card)
+						log.Printf("[bus] active put match=%s map=%s region=%s", ev.MatchID, card.Map, card.Region)
+
+					} else {
+						log.Printf("[bus] PF MatchCard(%s) error: %v — using minimal card", ev.MatchID, err)
+						ActivePut(ui.MatchCard{ID: ev.MatchID, Started: time.Now()})
+						log.Printf("[bus] active put match=%s map=%s region=%s", ev.MatchID, card.Map, card.Region)
+
+					}
+				} else {
+					ActivePut(ui.MatchCard{ID: ev.MatchID, Started: time.Now()})
+
 				}
 			}
 
@@ -69,7 +81,7 @@ func (b *Bot) StartEventSubscribers() func() {
 			if err == nil {
 				_ = d.PublishOrEditQueueMessage(
 					b.Sess, channelID,
-					ui.RenderQueuesEmbed(qs, true, ActiveList()),
+					ui.RenderQueuesEmbed(qs, true, cardsOrNil(b)),
 					ui.ComponentsForQueues(qs, true),
 				)
 			}
@@ -103,7 +115,7 @@ func (b *Bot) StartEventSubscribers() func() {
 			if err == nil {
 				_ = d.PublishOrEditQueueMessage(
 					b.Sess, channelID,
-					ui.RenderQueuesEmbed(qs, open, ActiveList()),
+					ui.RenderQueuesEmbed(qs, open, cardsOrNil(b)),
 					ui.ComponentsForQueues(qs, open),
 				)
 			}
@@ -113,11 +125,6 @@ func (b *Bot) StartEventSubscribers() func() {
 		}))
 
 		log.Printf("[bus] subscribers registered (once)")
-		// (Si quieres, deja el conteo; no dupliques el log de arriba)
-		// log.Printf("[bus] counts: MatchStarted=%d MatchFinished=%d",
-		// 	events.Count[events.MatchStarted](),
-		// 	events.Count[events.MatchFinished](),
-		// )
 
 		subsCancel = func() {
 			for _, c := range cancels {
@@ -127,4 +134,10 @@ func (b *Bot) StartEventSubscribers() func() {
 	})
 
 	return subsCancel
+}
+func cardsOrNil(b *Bot) []ui.MatchCard {
+	if b.Cfg != nil && b.Cfg.FFActiveMatchesUI {
+		return ActiveList()
+	}
+	return nil
 }

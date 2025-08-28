@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -17,10 +19,15 @@ type Config struct {
 	AnnounceChannelID string // de dónde leemos los embeds de PopFlash
 	PopflashBase      string
 	PopflashToken     string
+	FFActiveMatchesUI bool
+	PollSeconds       int
 }
 
 func Load() (*Config, error) {
 	_ = godotenv.Load()
+
+	base := firstNonEmpty(os.Getenv("POPFLASH_BASE"), os.Getenv("POPFLASH_API_BASE"))
+	tok := firstNonEmpty(os.Getenv("POPFLASH_TOKEN"), os.Getenv("POPFLASH_API_TOKEN"))
 
 	cfg := &Config{
 		Token:             os.Getenv("DISCORD_BOT_TOKEN"),
@@ -29,8 +36,12 @@ func Load() (*Config, error) {
 		Prefix:            firstNonEmpty(os.Getenv("DISCORD_PREFIX"), "!"),
 		QueueChannelID:    os.Getenv("DISCORD_CHANNEL_ID"),
 		AnnounceChannelID: os.Getenv("PF_ANNOUNCE_CHANNEL_ID"),
-		PopflashBase:      os.Getenv("POPFLASH_BASE"),
-		PopflashToken:     os.Getenv("POPFLASH_TOKEN"),
+		PopflashBase:      base,
+		PopflashToken:     tok,
+
+		// Feature Flag
+		FFActiveMatchesUI: strings.EqualFold(os.Getenv("FF_ACTIVE_MATCHES_UI"), "true"),
+		PollSeconds:       parseInt(os.Getenv("PF_POLL_SECONDS"), 60),
 	}
 
 	if cfg.Token == "" {
@@ -57,6 +68,25 @@ func firstNonEmpty(v, d string) string {
 		return d
 	}
 	return v
+}
+
+// func parseBool(v string) bool {
+// 	switch strings.ToLower(strings.TrimSpace(v)) {
+// 	case "1", "t", "true", "yes", "y", "on":
+// 		return true
+// 	default:
+// 		return false
+// 	}
+// }
+
+func parseInt(v string, def int) int {
+	if v == "" {
+		return def
+	}
+	if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		return n
+	}
+	return def
 }
 
 func (c *Config) Redacted() string {

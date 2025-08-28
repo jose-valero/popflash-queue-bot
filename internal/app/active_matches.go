@@ -1,4 +1,3 @@
-// internal/app/active.go
 package app
 
 import (
@@ -16,6 +15,15 @@ var (
 func ActivePut(card ui.MatchCard) {
 	activeMu.Lock()
 	activeByID[card.ID] = card
+	activeMu.Unlock()
+}
+
+func ActiveUpdateScore(id string, s1, s2 *int) {
+	activeMu.Lock()
+	if c, ok := activeByID[id]; ok {
+		c.Score1, c.Score2 = s1, s2
+		activeByID[id] = c
+	}
 	activeMu.Unlock()
 }
 
@@ -39,7 +47,6 @@ func ActiveList() []ui.MatchCard {
 		out = append(out, c)
 	}
 	activeMu.RUnlock()
-	// ordenar por fecha de inicio (más antiguas primero)
 	sort.Slice(out, func(i, j int) bool {
 		ti, tj := out[i].Started, out[j].Started
 		if ti.IsZero() {

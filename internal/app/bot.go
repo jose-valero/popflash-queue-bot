@@ -18,7 +18,7 @@ type Bot struct {
 }
 
 func NewBot(s *discordgo.Session, cfg *config.Config) *Bot {
-	var pf *popflash.Client
+	pf := popflash.New(cfg.PopflashBase, cfg.PopflashToken)
 	if cfg.PopflashToken != "" {
 		base := cfg.PopflashBase
 		if base == "" {
@@ -44,7 +44,9 @@ func (b *Bot) RegisterHandlers() {
 		b.Sess.AddHandler(HandleInteraction) // slash + components
 
 		b.cancelBus = b.StartEventSubscribers()
-
+		if b.Cfg.PollSeconds > 0 {
+			b.StartScorePoller()
+		}
 		_ = RegisterCommands(b.Sess, b.Cfg.AppID, b.Cfg.GuildID)
 		log.Printf("[wiring] handlers registered (once)")
 	})
