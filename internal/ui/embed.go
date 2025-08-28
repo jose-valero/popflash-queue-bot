@@ -1,4 +1,3 @@
-// internal/ui/embed.go
 // Pure-ish UI helpers for building the main queue embed.
 
 package ui
@@ -6,25 +5,35 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/jose-valero/popflash-queue-bot/internal/queue"
 )
 
+type MatchCard struct {
+	ID      string
+	Map     string
+	Region  string
+	Started time.Time
+	Team1   []string
+	Team2   []string
+}
+
 // RenderQueuesEmbed builds a single embed showing all queues in a channel.
-func RenderQueuesEmbed(qs []*queue.Queue, open bool) *discordgo.MessageEmbed {
+func RenderQueuesEmbed(qs []*queue.Queue, isOpen bool, cards []MatchCard) *discordgo.MessageEmbed {
 	footer := &discordgo.MessageEmbedFooter{
 		Text: map[bool]string{
 			true:  "🔓 Cola abierta — no pierdas tu slot",
 			false: "🔒 Cola cerrada — espera la próxima partida",
-		}[open],
+		}[isOpen],
 	}
 
 	// Si no querés cambiar color, dejá ambos en 0xB069FF.
 	color := map[bool]int{
 		true:  0x57F287, // verde cuando abierta
 		false: 0x808080, // gris cuando cerrada
-	}[open]
+	}[isOpen]
 
 	if len(qs) == 0 {
 		return &discordgo.MessageEmbed{
@@ -37,7 +46,7 @@ func RenderQueuesEmbed(qs []*queue.Queue, open bool) *discordgo.MessageEmbed {
 
 	var b strings.Builder
 	for idx, q := range qs {
-		fmt.Fprintf(&b, "**Queue #%d** (%d/%d)\n", idx+1, len(q.Players), q.Capacity)
+		fmt.Fprintf(&b, "**Fila #%d** (%d/%d)\n", idx+1, len(q.Players), q.Capacity)
 		if len(q.Players) == 0 {
 			b.WriteString("_(empty)_\n\n")
 			continue
@@ -49,7 +58,7 @@ func RenderQueuesEmbed(qs []*queue.Queue, open bool) *discordgo.MessageEmbed {
 	}
 
 	return &discordgo.MessageEmbed{
-		Title:       fmt.Sprintf("Ellos la llevan — %d queue(s)", len(qs)),
+		Title:       fmt.Sprintf("Ellos la llevan — %d Fila Global", len(qs)),
 		Description: b.String(),
 		Color:       color,
 		Footer:      footer,

@@ -9,24 +9,18 @@ import (
 )
 
 type Config struct {
-	Token   string
-	AppID   string
-	GuildID string
-	Prefix  string
-
-	// Canales explícitos
+	Token             string
+	AppID             string
+	GuildID           string
+	Prefix            string
 	QueueChannelID    string // dónde renderizamos la UI / botones
 	AnnounceChannelID string // de dónde leemos los embeds de PopFlash
+	PopflashBase      string
+	PopflashToken     string
 }
 
 func Load() (*Config, error) {
 	_ = godotenv.Load()
-
-	// Back-compat: DISCORD_CHANNEL_ID sigue funcionando para la cola
-	// queueID := firstNonEmpty(os.Getenv("DISCORD_QUEUE_CHANNEL_ID"), os.Getenv("DISCORD_CHANNEL_ID"))
-
-	// Preferimos PF_ANNOUNCE_CHANNEL_ID (tu env actual)
-	// announceID := firstNonEmpty(os.Getenv("POPFLASH_ANNOUNCE_CHANNEL_ID"), os.Getenv("PF_ANNOUNCE_CHANNEL_ID"))
 
 	cfg := &Config{
 		Token:             os.Getenv("DISCORD_BOT_TOKEN"),
@@ -35,6 +29,8 @@ func Load() (*Config, error) {
 		Prefix:            firstNonEmpty(os.Getenv("DISCORD_PREFIX"), "!"),
 		QueueChannelID:    os.Getenv("DISCORD_CHANNEL_ID"),
 		AnnounceChannelID: os.Getenv("PF_ANNOUNCE_CHANNEL_ID"),
+		PopflashBase:      os.Getenv("POPFLASH_BASE"),
+		PopflashToken:     os.Getenv("POPFLASH_TOKEN"),
 	}
 
 	if cfg.Token == "" {

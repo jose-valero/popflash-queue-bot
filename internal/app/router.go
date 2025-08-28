@@ -119,7 +119,7 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		qs, _ := qman.Queues(queueID)
 		if err := d.PublishOrEditQueueMessage(
 			s, queueID,
-			ui.RenderQueuesEmbed(qs, IsQueueOpen(queueID)),
+			ui.RenderQueuesEmbed(qs, IsQueueOpen(queueID), ActiveList()),
 			ui.ComponentsForQueues(qs, IsQueueOpen(queueID)),
 		); err != nil {
 			log.Printf("PublishOrEditQueueMessage error: %v", err)
@@ -176,10 +176,10 @@ func handleSlash(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if qs, err := qman.Queues(queueID); err == nil {
 			if d.IsPrivileged(i) {
 				// Admin: embed + selects solo para él (efímero)
-				_ = d.SendEphemeralComplex(s, i, ui.RenderQueuesEmbed(qs, IsQueueOpen(queueID)), ui.AdminComponentsForQueues(qs))
+				_ = d.SendEphemeralComplex(s, i, ui.RenderQueuesEmbed(qs, IsQueueOpen(queueID), ActiveList()), ui.AdminComponentsForQueues(qs))
 			} else {
 				// No admin: solo embed efímero (sin selects)
-				_ = d.SendEphemeralEmbed(s, i, ui.RenderQueuesEmbed(qs, IsQueueOpen(queueID)))
+				_ = d.SendEphemeralEmbed(s, i, ui.RenderQueuesEmbed(qs, IsQueueOpen(queueID), ActiveList()))
 			}
 		} else {
 			_ = d.SendEphemeral(s, i, "⚠️ No active queues.")
@@ -409,7 +409,7 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if qs, err := qman.Queues(queueID); err == nil && len(qs) > 0 {
 			_ = d.SendEphemeralComplex(
 				s, i,
-				ui.RenderQueuesEmbed(qs, IsQueueOpen(queueID)),
+				ui.RenderQueuesEmbed(qs, IsQueueOpen(queueID), ActiveList()),
 				ui.AdminComponentsForQueues(qs),
 			)
 		} else {
@@ -441,11 +441,11 @@ func updateUIAfterChange(s *discordgo.Session, _ *discordgo.InteractionCreate, c
 	var comps []discordgo.MessageComponent
 
 	if err == nil && len(qs) > 0 {
-		emb = ui.RenderQueuesEmbed(qs, IsQueueOpen(channelID))
+		emb = ui.RenderQueuesEmbed(qs, IsQueueOpen(channelID), ActiveList())
 		comps = ui.ComponentsForQueues(qs, IsQueueOpen(channelID))
 	} else {
 		// Fallback (shouldn’t normally happen after EnsureFirstQueue)
-		emb = ui.RenderQueuesEmbed(nil, IsQueueOpen(channelID))
+		emb = ui.RenderQueuesEmbed(nil, IsQueueOpen(channelID), ActiveList())
 		comps = ui.ComponentsForQueues(nil, IsQueueOpen(channelID))
 	}
 

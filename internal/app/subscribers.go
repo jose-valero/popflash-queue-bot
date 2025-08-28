@@ -1,8 +1,9 @@
-// internal/app/subscriber.go
+// internal/app/subscribers.go
 package app
 
 import (
-	"errors" // ⬅️ importa esto
+	"context"
+	"errors"
 	"log"
 	"sync"
 	"time"
@@ -33,24 +34,31 @@ func (b *Bot) StartEventSubscribers() func() {
 		var cancels []func()
 
 		// ---------- MATCH STARTED ----------
-		cancels = append(cancels, events.Subscribe(func(_ events.MatchStarted) {
+		cancels = append(cancels, events.Subscribe(func(ev events.MatchStarted) {
 			channelID := b.Cfg.QueueChannelID
 			if recentlyHandled("start:"+channelID, 3*time.Second) {
 				return
 			}
 
-			// Asegurá que exista Q#1 antes de tocar la lista
+			// Asegura Q#1
 			_, _ = qman.EnsureFirstQueue(channelID, "Queue #1", defaultCapacity)
 
-			// Opcional: pop de Q#1
+			// Opcional: pop de Q#1 al comenzar
 			if popped, _ := qman.PopFromFirst(channelID, defaultCapacity); len(popped) > 0 {
 				log.Printf("[bus] auto-pop %d from Queue#1 in %s", len(popped), channelID)
 			}
 
-			// Marcar abierta ANTES de render
+			// Si hay cliente PF y tenemos MatchID, hidrata y guarda card activa
+			if b.PF != nil && ev.MatchID != "" {
+				if card, err := b.PF.MatchCard(context.Background(), ev.MatchID); err == nil {
+					ActivePut(card)
+				}
+			}
+
+			// Abrimos la cola
 			SetQueueOpen(channelID, true)
 
-			// Snapshot SIEMPRE válido (fallback si ErrNotFound)
+			// Snapshot con fallback
 			qs, err := qman.Queues(channelID)
 			if errors.Is(err, queue.ErrNotFound) {
 				if q, e2 := qman.EnsureFirstQueue(channelID, "Queue #1", defaultCapacity); e2 == nil && q != nil {
@@ -61,8 +69,8 @@ func (b *Bot) StartEventSubscribers() func() {
 			if err == nil {
 				_ = d.PublishOrEditQueueMessage(
 					b.Sess, channelID,
-					ui.RenderQueuesEmbed(qs, true),
-					ui.ComponentsForQueues(qs, true), // ⬅️ botón habilitado
+					ui.RenderQueuesEmbed(qs, true, ActiveList()),
+					ui.ComponentsForQueues(qs, true),
 				)
 			}
 
@@ -70,14 +78,21 @@ func (b *Bot) StartEventSubscribers() func() {
 		}))
 
 		// ---------- MATCH FINISHED ----------
-		cancels = append(cancels, events.Subscribe(func(_ events.MatchFinished) {
+		cancels = append(cancels, events.Subscribe(func(ev events.MatchFinished) {
 			channelID := b.Cfg.QueueChannelID
 			if recentlyHandled("finish:"+channelID, 3*time.Second) {
 				return
 			}
-			SetQueueOpen(channelID, false)
 
-			// Snapshot con fallback mínimo
+			// Quita la partida de “activas”
+			if ev.MatchID != "" {
+				ActiveRemove(ev.MatchID)
+			}
+
+			// Si aún quedan partidas activas, mantenemos la cola abierta
+			open := ActiveCount() > 0
+			SetQueueOpen(channelID, open)
+
 			qs, err := qman.Queues(channelID)
 			if errors.Is(err, queue.ErrNotFound) {
 				if q, e2 := qman.EnsureFirstQueue(channelID, "Queue #1", defaultCapacity); e2 == nil && q != nil {
@@ -88,26 +103,27 @@ func (b *Bot) StartEventSubscribers() func() {
 			if err == nil {
 				_ = d.PublishOrEditQueueMessage(
 					b.Sess, channelID,
-					ui.RenderQueuesEmbed(qs, false),
-					ui.ComponentsForQueues(qs, false), // ⬅️ botón deshabilitado
+					ui.RenderQueuesEmbed(qs, open, ActiveList()),
+					ui.ComponentsForQueues(qs, open),
 				)
 			}
 
-			log.Printf("[bus] MatchFinished → queue CLOSED in %s", channelID)
+			log.Printf("[bus] MatchFinished → queue %s in %s",
+				map[bool]string{true: "OPEN", false: "CLOSED"}[open], channelID)
 		}))
 
 		log.Printf("[bus] subscribers registered (once)")
-		log.Printf("[bus] counts: MatchStarted=%d MatchFinished=%d",
-			events.Count[events.MatchStarted](),
-			events.Count[events.MatchFinished](),
-		)
+		// (Si quieres, deja el conteo; no dupliques el log de arriba)
+		// log.Printf("[bus] counts: MatchStarted=%d MatchFinished=%d",
+		// 	events.Count[events.MatchStarted](),
+		// 	events.Count[events.MatchFinished](),
+		// )
 
 		subsCancel = func() {
 			for _, c := range cancels {
 				c()
 			}
 		}
-		log.Printf("[bus] subscribers registered (once)")
 	})
 
 	return subsCancel

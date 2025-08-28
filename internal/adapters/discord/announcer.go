@@ -114,10 +114,10 @@ func HandleMessageCreate(_ *discordgo.Session, m *discordgo.MessageCreate) {
 	started, finished, mid := detectPFTriggers(m.Message)
 	if started && allowOnce(dedupeKey(m.ID, mid, "start")) {
 		log.Printf("[announcer] publish start key=%s", dedupeKey(m.ID, mid, "start"))
-		events.Publish(events.MatchStarted{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID})
+		events.Publish(events.MatchStarted{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, MatchID: mid})
 	}
 	if finished && allowOnce(dedupeKey(m.ID, mid, "finish")) {
-		events.Publish(events.MatchFinished{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID})
+		events.Publish(events.MatchFinished{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, MatchID: mid})
 	}
 }
 
@@ -128,9 +128,9 @@ func HandleMessageUpdate(_ *discordgo.Session, ev *discordgo.MessageUpdate) {
 
 	started, finished, mid := detectPFTriggers(ev.Message)
 	if started && allowOnce(dedupeKey(ev.ID, mid, "start")) {
-		events.Publish(events.MatchStarted{GuildID: ev.GuildID, ChannelID: ev.ChannelID, MessageID: ev.ID})
+		events.Publish(events.MatchStarted{GuildID: ev.GuildID, ChannelID: ev.ChannelID, MessageID: ev.ID, MatchID: mid})
 	}
 	if finished && allowOnce(dedupeKey(ev.ID, mid, "finish")) {
-		events.Publish(events.MatchFinished{GuildID: ev.GuildID, ChannelID: ev.ChannelID, MessageID: ev.ID})
+		events.Publish(events.MatchFinished{GuildID: ev.GuildID, ChannelID: ev.ChannelID, MessageID: ev.ID, MatchID: mid})
 	}
 }

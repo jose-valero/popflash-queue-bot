@@ -1,4 +1,3 @@
-// internal/ui/components.go
 package ui
 
 import (

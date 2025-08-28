@@ -6,17 +6,27 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	disc "github.com/jose-valero/popflash-queue-bot/internal/adapters/discord"
+	"github.com/jose-valero/popflash-queue-bot/internal/adapters/popflash"
 	"github.com/jose-valero/popflash-queue-bot/pkg/config"
 )
 
 type Bot struct {
 	Sess      *discordgo.Session
 	Cfg       *config.Config
+	PF        *popflash.Client
 	cancelBus func()
 }
 
 func NewBot(s *discordgo.Session, cfg *config.Config) *Bot {
-	return &Bot{Sess: s, Cfg: cfg}
+	var pf *popflash.Client
+	if cfg.PopflashToken != "" {
+		base := cfg.PopflashBase
+		if base == "" {
+			base = "https://api.popflash.site" // o el default que use tu client
+		}
+		pf = popflash.New(base, cfg.PopflashToken)
+	}
+	return &Bot{Sess: s, Cfg: cfg, PF: pf}
 }
 
 var wiringOnce sync.Once
