@@ -31,10 +31,10 @@ type getMatchResp struct {
 		Map        *string `json:"map"`
 		Datacenter *int    `json:"datacenter"`
 		CreatedAt  *string `json:"created_at"`
-		Status     *string `json:"status"` // NUEVO (opcional)
-		Score1     *int    `json:"score1"` // NUEVO
-		Score2     *int    `json:"score2"` // NUEVO
-		Users      []struct {
+		// Status     *string `json:"status"` // NUEVO (opcional)
+		Score1 *int `json:"score1"` // NUEVO
+		Score2 *int `json:"score2"` // NUEVO
+		Users  []struct {
 			Team *int `json:"team"` // 1 o 2
 			User *struct {
 				Name *string `json:"name"`
@@ -55,13 +55,7 @@ func parseTime(ts *string) time.Time {
 		return time.Time{}
 	}
 	s := *ts
-	layouts := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05Z07:00",
-		"2006-01-02 15:04:05",
-		"2006-01-02 15:04:05.000000-07",
-	}
+	layouts := []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05Z07:00", "2006-01-02 15:04:05", "2006-01-02 15:04:05.000000-07"}
 	for _, l := range layouts {
 		if t, err := time.Parse(l, s); err == nil {
 			return t

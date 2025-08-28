@@ -74,10 +74,11 @@ func humanSince(t time.Time) string {
 }
 
 func safe(s string) string {
-	if strings.TrimSpace(s) == "" {
+	t := strings.TrimSpace(s)
+	if t == "" || t == "-" {
 		return "—"
 	}
-	return s
+	return t
 }
 
 func bulletList(team []string, max int) string {
@@ -106,10 +107,10 @@ func quoteBlock(s string) string {
 }
 
 func scoreSuffix(c MatchCard) string {
-	if c.Score1 == nil && c.Score2 == nil {
+	if c.Score1 == nil || c.Score2 == nil {
 		return ""
 	}
-	return fmt.Sprintf(" • **%d–%d**", c.Score1, c.Score2)
+	return fmt.Sprintf(" • **%d–%d**", *c.Score1, *c.Score2)
 }
 
 // Tarjeta compacta de una partida (columna inline)
