@@ -35,8 +35,8 @@ func SendEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, msg str
 	return err
 }
 
-// Responde efímero con SOLO componentes (sin embed).
-// Usa un contenido "invisible" para satisfacer la API.
+// send ephemeral message just comps wihtout embs.
+// use the invisible content to stisfy the API.
 func SendEphemeralComponents(
 	s *discordgo.Session,
 	i *discordgo.InteractionCreate,
