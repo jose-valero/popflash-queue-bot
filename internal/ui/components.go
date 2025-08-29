@@ -7,6 +7,7 @@ import (
 	"github.com/jose-valero/popflash-queue-bot/internal/queue"
 )
 
+// bot bottoms, "queue" | "leave" | "admin"
 func ComponentsForQueues(qs []*queue.Queue, isOpen bool) []discordgo.MessageComponent {
 	joinID := "queue_join:open"
 	if !isOpen {
@@ -16,21 +17,22 @@ func ComponentsForQueues(qs []*queue.Queue, isOpen bool) []discordgo.MessageComp
 		discordgo.ActionsRow{
 			Components: []discordgo.MessageComponent{
 				discordgo.Button{
-					Label:    "La Llevo",
+					Label:    "La Llevo", // if u need it changes for ur language, "la llevo" means "join"
 					Style:    discordgo.PrimaryButton,
 					CustomID: joinID,
 					Emoji:    &discordgo.ComponentEmoji{Name: "🌕"},
-					Disabled: !isOpen, // si la cola está cerrada, deshabilita el join
+					Disabled: !isOpen, // disabled if the queue is closed
 				},
 				discordgo.Button{
-					Label:    "Chau",
+					Label:    "Chau", // if u need it changes for ur language, "chau" means leave
 					Style:    discordgo.SecondaryButton,
 					CustomID: "queue_leave",
 					Emoji:    &discordgo.ComponentEmoji{Name: "👋"},
 				},
-				// visible para todos; solo los admins verán/usaràn el panel efímero
+
+				// visible for everyone; just the admins can use this button
 				discordgo.Button{
-					Label:    "Admin…",
+					Label:    "Admin",
 					Style:    discordgo.SecondaryButton,
 					CustomID: "admin_panel",
 					Emoji:    &discordgo.ComponentEmoji{Name: "👮"},
@@ -40,19 +42,15 @@ func ComponentsForQueues(qs []*queue.Queue, isOpen bool) []discordgo.MessageComp
 	}
 }
 
-// ---------- ADMIN (EFÍMERO): solo selects (acciones + kick) ----------
-
+// admin selectors, actions(reset/close) | kick
 func AdminComponentsForQueues(qs []*queue.Queue) []discordgo.MessageComponent {
 	comps := make([]discordgo.MessageComponent, 0, 2)
 
-	// Select de acciones por cola (Reset / Close). Cap a 12 colas (24 opciones).
+	// actions by queue (reset/close), cap of 12 queues (24 options)
 	if len(qs) > 0 {
-		n := len(qs)
-		if n > 12 {
-			n = 12
-		}
+		n := min(len(qs), 12)
 		opts := make([]discordgo.SelectMenuOption, 0, n*2)
-		for idx := 0; idx < n; idx++ {
+		for idx := range n {
 			k := idx + 1
 			opts = append(opts,
 				discordgo.SelectMenuOption{
@@ -78,7 +76,7 @@ func AdminComponentsForQueues(qs []*queue.Queue) []discordgo.MessageComponent {
 		})
 	}
 
-	// Select de Kick (hasta 25 players)
+	//Kick select (25 players)
 	kopts := kickOptions(qs)
 	if len(kopts) > 0 {
 		comps = append(comps, discordgo.ActionsRow{
@@ -93,17 +91,6 @@ func AdminComponentsForQueues(qs []*queue.Queue) []discordgo.MessageComponent {
 	}
 
 	return comps
-}
-
-// ---------- helpers ----------
-
-func hasAnyPlayers(qs []*queue.Queue) bool {
-	for _, q := range qs {
-		if len(q.Players) > 0 {
-			return true
-		}
-	}
-	return false
 }
 
 func kickOptions(qs []*queue.Queue) []discordgo.SelectMenuOption {

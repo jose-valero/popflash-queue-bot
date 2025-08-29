@@ -359,31 +359,6 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	switch customID {
 
-	// case "queue_join":
-	// 	if u == nil {
-	// 		_ = d.SendEphemeral(s, i, "⚠️ Could not identify you.")
-	// 		return
-	// 	}
-	// 	if !IsQueueOpen(queueID) {
-	// 		_ = d.SendEphemeral(s, i, "🔒 Queue is closed. Wait for the next **match started**.")
-	// 		return
-	// 	}
-	// 	if d.VoiceRequireToJoin() && !d.IsUserInAllowedVoice(s, i.GuildID, u.ID) {
-	// 		_ = d.SendEphemeral(s, i, "🔇 You must be in an allowed voice channel to join.")
-	// 		return
-	// 	}
-	// 	if _, err := qman.JoinAny(queueID, u.ID, u.Username, defaultCapacity); err != nil {
-	// 		if errors.Is(err, queue.ErrAlreadyIn) {
-	// 			_ = d.SendEphemeral(s, i, "You're already in a queue.")
-	// 			return
-	// 		}
-	// 		_ = d.SendEphemeral(s, i, "⚠️ "+err.Error())
-	// 		return
-	// 	}
-	// 	_ = d.SendEphemeral(s, i, "🙌 Joined!")
-	// 	updateUIAfterChange(s, i, queueID)
-	// 	return
-
 	case "queue_leave":
 		if u == nil {
 			_ = d.SendEphemeral(s, i, "⚠️ Could not identify you.")
@@ -407,9 +382,10 @@ func handleComponent(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 		if qs, err := qman.Queues(queueID); err == nil && len(qs) > 0 {
-			_ = d.SendEphemeralComplex(
-				s, i,
-				ui.RenderQueuesEmbed(qs, IsQueueOpen(queueID), ActiveList()),
+			// we just render one embed
+			_ = d.SendEphemeralComponents(
+				s,
+				i,
 				ui.AdminComponentsForQueues(qs),
 			)
 		} else {

@@ -35,6 +35,25 @@ func SendEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, msg str
 	return err
 }
 
+// Responde efímero con SOLO componentes (sin embed).
+// Usa un contenido "invisible" para satisfacer la API.
+func SendEphemeralComponents(
+	s *discordgo.Session,
+	i *discordgo.InteractionCreate,
+	comps []discordgo.MessageComponent,
+) error {
+	// Zero-width space para que el mensaje no muestre texto
+	const zwsp = "\u200B"
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Flags:      discordgo.MessageFlagsEphemeral,
+			Content:    zwsp,
+			Components: comps,
+		},
+	})
+}
+
 // SendEphemeralEmbed responds with an ephemeral embed.
 func SendEphemeralEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, emb *discordgo.MessageEmbed) error {
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
